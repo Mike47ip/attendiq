@@ -17,7 +17,9 @@ import {
   verifyAuthenticationResponse,
 } from "@simplewebauthn/server";
 
-dotenv.config();
+
+if (process.env.NODE_ENV !== "production") dotenv.config();
+
 
 const app = express();
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
