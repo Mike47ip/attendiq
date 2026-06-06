@@ -1,6 +1,5 @@
 // client/src/components/BiometricVerifier.jsx
 
-import { useEffect } from "react";
 import { useBiometric } from "../hooks/useBiometric";
 
 /**

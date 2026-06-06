@@ -1,6 +1,6 @@
 // client/src/components/GPSVerifier.jsx
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useGeolocation } from "../hooks/useGeolocation";
 import { validateProximity, formatDistance } from "../utils/gps";
 import { validateGPS } from "../api/attendance";
@@ -18,29 +18,26 @@ import { validateGPS } from "../api/attendance";
  */
 export default function GPSVerifier({ userId, office, onVerified, onCancel }) {
   const gps = useGeolocation();
-  const [serverState, setServerState] = useState("idle"); // idle | checking | verified | rejected
+  const [serverState, setServerState] = useState("idle");
   const [serverError, setServerError] = useState(null);
-  const [proximity, setProximity] = useState(null);
 
-  // Start tracking on mount
+  // Derived state — no useEffect needed
+  const proximity = useMemo(() => {
+    if (!gps.lat || !gps.lng) return null;
+    return validateProximity(gps.lat, gps.lng, gps.accuracy, office);
+  }, [gps.lat, gps.lng, gps.accuracy, office]);
+
+  // Start GPS tracking on mount
   useEffect(() => {
     gps.startTracking();
     return () => gps.stopTracking();
   }, []);
 
-  // Update proximity preview whenever coords change
-  useEffect(() => {
-    if (gps.lat && gps.lng) {
-      const result = validateProximity(gps.lat, gps.lng, gps.accuracy, office);
-      setProximity(result);
-    }
-  }, [gps.lat, gps.lng, gps.accuracy, office]);
-
   const handleVerify = async () => {
     setServerState("checking");
     setServerError(null);
     try {
-      const position = gps.capturePosition(100);
+      const position = gps.capturePosition(150);
       const result = await validateGPS({ ...position, userId });
       if (result.valid) {
         setServerState("verified");

@@ -2,51 +2,57 @@
 
 import { PrismaClient } from "@prisma/client";
 import { PrismaPg } from "@prisma/adapter-pg";
+import bcrypt from "bcryptjs";
 import dotenv from "dotenv";
 
 dotenv.config();
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
-const prisma = new PrismaClient({ adapter });
+const prisma  = new PrismaClient({ adapter });
 
 async function main() {
-  // ── Create your office ──────────────────────────────────────────────
-  // Replace lat and lng with your real office coordinates from Google Maps
-  const office = await prisma.office.create({
-    data: {
-      name: "Head Office",
-      lat: 5.6037,       // ← your real office lat
-      lng: -0.1870,      // ← your real office lng
+  // ── Office ───────────────────────────────────────────────────────────────
+  // Replace with your real office coordinates
+  const office = await prisma.office.upsert({
+    where: { id: "seed-office" },
+    update: {},
+    create: {
+      id:           "seed-office",
+      name:         "Head Office",
+      lat:          6.796750,    // ← replace with real lat
+      lng:          -1.579770,   // ← replace with real lng
       radiusMetres: 150,
     },
   });
+  console.log("✓ Office:", office.name);
 
-  console.log("✓ Office created:", office.name, office.id);
-
-  // ── Create a test user ──────────────────────────────────────────────
-  const user = await prisma.user.create({
-    data: {
-      name: "Amara Osei",
-      email: "amara@company.com",
-      role: "staff",
-      dept: "Tech",
-      avatarInitials: "AO",
-      color: "#6366f1",
-      officeId: office.id,
+  // ── Admin user ───────────────────────────────────────────────────────────
+  const adminPassword = await bcrypt.hash("admin123", 10);
+  const admin = await prisma.user.upsert({
+    where: { email: "admin@company.com" },
+    update: {},
+    create: {
+      name:           "Admin",
+      email:          "admin@company.com",
+      password:       adminPassword,
+      role:           "admin",
+      dept:           "Management",
+      avatarInitials: "AD",
+      color:          "#6366f1",
+      officeId:       office.id,
     },
   });
+  console.log("✓ Admin created:", admin.email);
 
-  console.log("✓ User created:", user.name, user.id);
   console.log("");
-  console.log("── Copy this into App.jsx ──────────────────────");
-  console.log(`id: "${user.id}"`);
-  console.log(`officeId: "${office.id}"`);
-  console.log("────────────────────────────────────────────────");
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.log("  Login credentials:");
+  console.log("  Email:    admin@company.com");
+  console.log("  Password: admin123");
+  console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  console.log("  Change this password after first login!");
 }
 
 main()
-  .catch((e) => {
-    console.error(e);
-    process.exit(1);
-  })
+  .catch(e => { console.error(e); process.exit(1); })
   .finally(() => prisma.$disconnect());

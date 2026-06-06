@@ -95,7 +95,7 @@ export function useGeolocation() {
    * Throws if not tracking or accuracy is too poor.
    */
   const capturePosition = useCallback(
-    (maxAccuracy = 100) => {
+    (maxAccuracy = 150) => {
       if (state.status !== "tracking") {
         throw new Error("GPS not ready. Please wait for a fix.");
       }
