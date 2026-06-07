@@ -23,4 +23,9 @@ dist-ssr
 *.sln
 *.sw?
 
+.env
+.env.local
+.env.production
+*.pem
+
 /src/generated/prisma
