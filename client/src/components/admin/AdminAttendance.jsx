@@ -1,7 +1,8 @@
 // client/src/components/admin/AdminAttendance.jsx
 
 import { useState, useEffect } from "react";
-import { getAttendanceHistory } from "../../api/auth";
+import { getAttendanceHistory } from "../../api/attendance";
+
 
 export default function AdminAttendance() {
   const today = new Date().toISOString().split("T")[0];

@@ -23,7 +23,7 @@ export default function BiometricVerifier({
   onVerified,
   onCancel,
 }) {
-  const bio = useBiometric();
+const bio = useBiometric({ apiBase: import.meta.env.VITE_API_URL || "/api" });
 
   const handleAction = async () => {
     try {
