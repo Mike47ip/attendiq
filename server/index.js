@@ -1,10 +1,9 @@
 // server/index.js
-
+import "dotenv/config"
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
 import { json } from "express";
-import dotenv from "dotenv";
 import jwt from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import pkg from "@prisma/client";
@@ -18,7 +17,6 @@ import {
 } from "@simplewebauthn/server";
 
 
-if (process.env.NODE_ENV !== "production") dotenv.config();
 
 
 const app = express();
