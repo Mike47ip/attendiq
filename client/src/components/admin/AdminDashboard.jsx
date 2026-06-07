@@ -1,7 +1,7 @@
 // client/src/components/admin/AdminDashboard.jsx
 
 import { useState, useEffect } from "react";
-import { getTodayStats, getAttendanceHistory } from "../../api/attendance";
+import { getTodayStats, getAttendanceHistory } from "../../api/auth";
 
 export default function AdminDashboard() {
   const [stats, setStats] = useState(null);
