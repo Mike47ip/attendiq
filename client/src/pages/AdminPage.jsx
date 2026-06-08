@@ -19,7 +19,7 @@ export default function AdminPage() {
   const [view, setView] = useState("dashboard");
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white flex flex-col">
+    <div className="min-h-screen bg-zinc-950 text-white flex flex-col pb-16 sm:pb-0">
 
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur-md">
@@ -47,23 +47,22 @@ export default function AdminPage() {
         </div>
       </header>
 
-      {/* Nav */}
-      <nav className="border-b border-zinc-800 bg-zinc-950 overflow-x-auto">
-        <div className="max-w-6xl mx-auto px-2 sm:px-6 flex">
+      {/* Desktop top nav — hidden on mobile */}
+      <nav className="hidden sm:block border-b border-zinc-800 bg-zinc-950">
+        <div className="max-w-6xl mx-auto px-6 flex">
           {NAV.map(({ key, label, icon }) => (
             <button
               key={key}
               onClick={() => setView(key)}
-              className="flex items-center gap-1.5 px-3 sm:px-4 py-3 font-semibold transition-all whitespace-nowrap flex-1 sm:flex-none justify-center sm:justify-start"
+              className="flex items-center gap-2 px-4 py-3 text-sm font-semibold transition-all whitespace-nowrap"
               style={{
-                fontSize: "clamp(11px, 2.5vw, 14px)",
                 color: view === key ? "#818cf8" : "#6b7280",
                 borderBottom: view === key ? "2px solid #818cf8" : "2px solid transparent",
                 marginBottom: -1,
               }}
             >
-              <span className="text-base sm:text-sm">{icon}</span>
-              <span className="hidden xs:inline sm:inline">{label}</span>
+              <span>{icon}</span>
+              {label}
             </button>
           ))}
         </div>
@@ -77,7 +76,7 @@ export default function AdminPage() {
         {view === "attendance" && <AdminAttendance />}
       </main>
 
-      {/* Mobile bottom nav */}
+      {/* Mobile bottom nav — hidden on desktop */}
       <nav className="sm:hidden fixed bottom-0 left-0 right-0 z-50 bg-zinc-950 border-t border-zinc-800">
         <div className="flex">
           {NAV.map(({ key, label, icon }) => (
@@ -87,9 +86,11 @@ export default function AdminPage() {
               className="flex-1 flex flex-col items-center justify-center py-3 gap-1 transition-all"
               style={{
                 color: view === key ? "#818cf8" : "#52525b",
+                borderTop: view === key ? "2px solid #818cf8" : "2px solid transparent",
+                marginTop: -1,
               }}
             >
-              <span style={{ fontSize: 18 }}>{icon}</span>
+              <span style={{ fontSize: 20 }}>{icon}</span>
               <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.03em" }}>
                 {label}
               </span>
@@ -97,9 +98,6 @@ export default function AdminPage() {
           ))}
         </div>
       </nav>
-
-      {/* Bottom padding on mobile so content isn't hidden behind bottom nav */}
-      <div className="sm:hidden h-16" />
     </div>
   );
 }
