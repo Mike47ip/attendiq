@@ -1,5 +1,5 @@
 // server/index.js
-import "dotenv/config"
+import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -15,9 +15,6 @@ import {
   generateAuthenticationOptions,
   verifyAuthenticationResponse,
 } from "@simplewebauthn/server";
-
-
-
 
 const app = express();
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
@@ -257,6 +254,7 @@ app.post("/api/attendance/validate-gps", async (req, res) => {
 
 // ══════════════════════════════════════════════════════════════════════════
 // WEBAUTHN — @simplewebauthn/server v13
+// platform authenticator only — forces device biometric (Face ID, fingerprint, Windows Hello)
 // ══════════════════════════════════════════════════════════════════════════
 
 app.post("/api/auth/register/start", async (req, res) => {
@@ -271,11 +269,10 @@ app.post("/api/auth/register/start", async (req, res) => {
       userName,
       attestationType: "none",
       authenticatorSelection: {
-        authenticatorAttachment: "platform",
-        userVerification: "required",
-        residentKey: "preferred",
+        authenticatorAttachment: "platform",  // device-native ONLY — no Google PM, no USB keys
+        userVerification: "required",          // must use biometric or device PIN
+        residentKey: "required",               // store credential on device
       },
-      // v13: pass credentialId as raw base64url string, no Buffer, no type field
       excludeCredentials: existingCredentials.map(c => ({ id: c.credentialId })),
     });
 
@@ -311,7 +308,6 @@ app.post("/api/auth/register/finish", async (req, res) => {
       return res.status(400).json({ message: "Registration failed" });
     }
 
-    // v13: credential info is under registrationInfo.credential
     const { credential: cred, credentialDeviceType } = verification.registrationInfo;
 
     await prisma.webAuthnCredential.create({
@@ -347,7 +343,6 @@ app.post("/api/auth/login/start", async (req, res) => {
     const options = await generateAuthenticationOptions({
       rpID: RP_ID,
       userVerification: "required",
-      // v13: pass credentialId as raw base64url string, no Buffer, no type field
       allowCredentials: credentials.map(c => ({ id: c.credentialId })),
     });
 
@@ -382,7 +377,6 @@ app.post("/api/auth/login/finish", async (req, res) => {
     });
     if (!credential) return res.status(404).json({ message: "Credential not found" });
 
-    // v13: use credential key instead of authenticator
     const verification = await verifyAuthenticationResponse({
       response: assertion,
       expectedChallenge: challengeRecord.challenge,
@@ -418,6 +412,22 @@ app.post("/api/auth/login/finish", async (req, res) => {
   } catch (err) {
     console.error("Login finish error:", err.message);
     res.status(500).json({ message: err.message || "Authentication failed" });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// RE-REGISTRATION — clears old credentials so user can re-register
+// with device biometric after the platform-only fix
+// ══════════════════════════════════════════════════════════════════════════
+
+app.delete("/api/auth/credentials/:userId", requireAdmin, async (req, res) => {
+  try {
+    await prisma.webAuthnCredential.deleteMany({ where: { userId: req.params.userId } });
+    await prisma.webAuthnChallenge.deleteMany({ where: { userId: req.params.userId } });
+    res.json({ success: true, message: "Credentials cleared. User can re-register." });
+  } catch (err) {
+    console.error("Clear credentials error:", err);
+    res.status(500).json({ message: "Failed to clear credentials" });
   }
 });
 
