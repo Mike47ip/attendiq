@@ -22,38 +22,37 @@ async function request(path, options = {}) {
 
 /**
  * validateGPS
- * Sends GPS coords to the server for Haversine validation.
- * Server returns a short-lived gpsToken if location is valid.
+ * Sends GPS coords + faceToken to server for validation.
+ * Server verifies face token first, then checks GPS proximity.
+ * Returns a short-lived gpsToken if both pass.
  */
-export async function validateGPS({ lat, lng, accuracy, userId }) {
+export async function validateGPS({ lat, lng, accuracy, userId, faceToken }) {
   return request("/attendance/validate-gps", {
     method: "POST",
-    body: { lat, lng, accuracy, userId },
+    body: { lat, lng, accuracy, userId, faceToken },
   });
-  // Returns: { valid: true, gpsToken: "jwt...", distance: 47, officeId: "..." }
 }
 
 /**
  * clockIn
- * Records a clock-in after both GPS and biometric have passed.
- * Requires the sessionToken returned from biometric verification.
+ * Records clock-in using the gpsToken from GPS verification.
+ * gpsToken already embeds faceVerified + gpsVerified flags.
  */
-export async function clockIn({ userId, sessionToken }) {
+export async function clockIn({ userId, gpsToken }) {
   return request("/attendance/clock-in", {
     method: "POST",
-    body: { userId, sessionToken },
+    body: { userId, gpsToken },
   });
-  // Returns: { id, userId, clockIn, date, status, gpsVerified, biometricVerified }
 }
 
 /**
  * clockOut
- * Optional — records clock-out time for the current active record.
+ * Records clock-out time for the current active record.
  */
-export async function clockOut({ userId, sessionToken }) {
+export async function clockOut({ userId }) {
   return request("/attendance/clock-out", {
     method: "POST",
-    body: { userId, sessionToken },
+    body: { userId },
   });
 }
 
@@ -67,7 +66,7 @@ export async function getTodayRecord(userId) {
 
 /**
  * getAttendanceHistory
- * Manager endpoint — gets all staff records for a date range.
+ * Staff endpoint — gets records for a date range.
  */
 export async function getAttendanceHistory({ startDate, endDate, deptFilter }) {
   const params = new URLSearchParams({ startDate, endDate });
@@ -77,7 +76,7 @@ export async function getAttendanceHistory({ startDate, endDate, deptFilter }) {
 
 /**
  * getDashboardStats
- * Manager endpoint — today's summary stats.
+ * Admin endpoint — today's summary stats.
  */
 export async function getDashboardStats() {
   return request("/attendance/stats/today");
@@ -89,5 +88,4 @@ export async function getDashboardStats() {
  */
 export async function checkDeviceRegistered(userId) {
   return request(`/auth/device-status/${userId}`);
-  // Returns: { registered: true/false }
 }

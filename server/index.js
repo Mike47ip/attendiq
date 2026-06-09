@@ -16,7 +16,7 @@ const prisma = new PrismaClient({ adapter });
 
 const ORIGIN  = process.env.ORIGIN  || "https://localhost:5173";
 const JWT_SECRET = process.env.JWT_SECRET;
-const FACE_TOKEN_EXPIRY    = "3m";
+const FACE_TOKEN_EXPIRY    = "10m";
 const GPS_TOKEN_EXPIRY     = "3m";
 
 app.use(helmet());
