@@ -9,19 +9,59 @@ import bcrypt from "bcryptjs";
 import pkg from "@prisma/client";
 const { PrismaClient } = pkg;
 import { PrismaPg } from "@prisma/adapter-pg";
+import fetch from "node-fetch";
 
 const app = express();
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
-const ORIGIN  = process.env.ORIGIN  || "https://localhost:5173";
-const JWT_SECRET = process.env.JWT_SECRET;
-const FACE_TOKEN_EXPIRY    = "10m";
-const GPS_TOKEN_EXPIRY     = "3m";
+const ORIGIN       = process.env.ORIGIN    || "https://localhost:5173";
+const JWT_SECRET   = process.env.JWT_SECRET;
+const FACE_TOKEN_EXPIRY = "10m";
+const GPS_TOKEN_EXPIRY  = "10m";
+
+// Azure Face API config
+const AZURE_FACE_KEY      = process.env.AZURE_FACE_KEY;
+const AZURE_FACE_ENDPOINT = process.env.AZURE_FACE_ENDPOINT?.replace(/\/$/, ""); // remove trailing slash
+const AZURE_PERSON_GROUP  = "attendiq-staff"; // one group for all staff
 
 app.use(helmet());
 app.use(cors({ origin: ORIGIN, credentials: true }));
-app.use(json({ limit: "2mb" }));
+app.use(json({ limit: "10mb" })); // large limit for base64 images
+
+// ── Azure Face API helpers ─────────────────────────────────────────────────
+
+async function azureRequest(path, method = "GET", body = null) {
+  const url = `${AZURE_FACE_ENDPOINT}/face/v1.0${path}`;
+  const options = {
+    method,
+    headers: {
+      "Ocp-Apim-Subscription-Key": AZURE_FACE_KEY,
+      "Content-Type": body instanceof Buffer ? "application/octet-stream" : "application/json",
+    },
+  };
+  if (body) options.body = body instanceof Buffer ? body : JSON.stringify(body);
+  const res = await fetch(url, options);
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : {};
+  if (!res.ok) throw new Error(data.error?.message || `Azure error: ${res.status}`);
+  return data;
+}
+
+// Ensure person group exists
+async function ensurePersonGroup() {
+  try {
+    await azureRequest(`/persongroups/${AZURE_PERSON_GROUP}`);
+  } catch {
+    // Create if doesn't exist
+    await azureRequest(`/persongroups/${AZURE_PERSON_GROUP}`, "PUT", {
+      name: "AttendIQ Staff",
+      recognitionModel: "recognition_04", // latest, most accurate model
+    });
+  }
+}
+
+// ── Auth helpers ───────────────────────────────────────────────────────────
 
 function requireAuth(req, res, next) {
   const token = req.headers.authorization?.split(" ")[1];
@@ -58,11 +98,6 @@ function getAttendanceStatus(clockInTime) {
   return h > 9 || (h === 9 && m > 5) ? "late" : "on-time";
 }
 
-function faceDistance(desc1, desc2) {
-  if (!desc1 || !desc2 || desc1.length !== desc2.length) return Infinity;
-  return Math.sqrt(desc1.reduce((sum, val, i) => sum + (val - desc2[i]) ** 2, 0));
-}
-
 // ══════════════════════════════════════════════════════════════════════════
 // AUTH
 // ══════════════════════════════════════════════════════════════════════════
@@ -86,7 +121,7 @@ app.post("/api/auth/login", async (req, res) => {
         role: user.role, dept: user.dept,
         avatarInitials: user.avatarInitials, color: user.color,
         officeId: user.officeId,
-        faceRegistered: !!user.faceDescriptor,
+        faceRegistered: user.faceRegistered,
         office: user.office ? {
           id: user.office.id, name: user.office.name,
           lat: user.office.lat, lng: user.office.lng,
@@ -101,54 +136,139 @@ app.post("/api/auth/login", async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-// FACE RECOGNITION
+// AZURE FACE RECOGNITION
 // ══════════════════════════════════════════════════════════════════════════
 
+// Register face — called once on first login
+// Receives base64 image, uploads to Azure, stores personId
 app.post("/api/auth/face/register", async (req, res) => {
   try {
-    const { userId, descriptor } = req.body;
-    if (!userId || !descriptor || !Array.isArray(descriptor)) {
-      return res.status(400).json({ message: "userId and descriptor array required" });
+    const { userId, imageBase64 } = req.body;
+    if (!userId || !imageBase64) {
+      return res.status(400).json({ message: "userId and imageBase64 required" });
     }
-    if (descriptor.length !== 128) {
-      return res.status(400).json({ message: "Invalid face descriptor" });
-    }
+
+    await ensurePersonGroup();
+
+    // Create a person in Azure for this user
+    const person = await azureRequest(
+      `/persongroups/${AZURE_PERSON_GROUP}/persons`,
+      "POST",
+      { name: userId, userData: userId }
+    );
+
+    // Convert base64 to buffer and add face to person
+    const imageBuffer = Buffer.from(imageBase64.replace(/^data:image\/\w+;base64,/, ""), "base64");
+
+    await azureRequest(
+      `/persongroups/${AZURE_PERSON_GROUP}/persons/${person.personId}/persistedFaces`,
+      "POST",
+      imageBuffer
+    );
+
+    // Train the person group
+    await azureRequest(`/persongroups/${AZURE_PERSON_GROUP}/train`, "POST");
+
+    // Save Azure person ID to database
     await prisma.user.update({
       where: { id: userId },
-      data: { faceDescriptor: descriptor },
+      data: {
+        azureFaceId: person.personId,
+        faceRegistered: true,
+      },
     });
+
     res.json({ success: true });
   } catch (err) {
     console.error("Face register error:", err);
-    res.status(500).json({ message: "Failed to register face" });
+    res.status(500).json({ message: err.message || "Failed to register face" });
   }
 });
 
+// Verify face at clock-in
 app.post("/api/auth/face/verify", async (req, res) => {
   try {
-    const { userId, descriptor } = req.body;
-    if (!userId || !descriptor || !Array.isArray(descriptor)) {
-      return res.status(400).json({ message: "userId and descriptor required" });
+    const { userId, imageBase64 } = req.body;
+    if (!userId || !imageBase64) {
+      return res.status(400).json({ message: "userId and imageBase64 required" });
     }
+
     const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user) return res.status(404).json({ message: "User not found" });
-    if (!user.faceDescriptor) {
+    if (!user?.azureFaceId) {
       return res.status(400).json({ message: "No face registered for this user" });
     }
-    const distance = faceDistance(descriptor, user.faceDescriptor);
-    const THRESHOLD = 0.6;
-    if (distance > THRESHOLD) {
-      return res.status(401).json({ verified: false, message: "Face did not match. Please try again." });
+
+    // Convert base64 to buffer
+    const imageBuffer = Buffer.from(imageBase64.replace(/^data:image\/\w+;base64,/, ""), "base64");
+
+    // Step 1 — Detect face in the submitted image
+    const detected = await azureRequest(
+      "/detect?detectionModel=detection_03&recognitionModel=recognition_04&returnFaceId=true",
+      "POST",
+      imageBuffer
+    );
+
+    if (!detected || detected.length === 0) {
+      return res.status(401).json({ verified: false, message: "No face detected in image. Look directly at the camera." });
     }
+
+    if (detected.length > 1) {
+      return res.status(401).json({ verified: false, message: "Multiple faces detected. Only one person should be in frame." });
+    }
+
+    const faceId = detected[0].faceId;
+
+    // Step 2 — Verify face against stored person
+    const verification = await azureRequest("/verify", "POST", {
+      faceId,
+      personGroupId: AZURE_PERSON_GROUP,
+      personId: user.azureFaceId,
+    });
+
+    if (!verification.isIdentical || verification.confidence < 0.7) {
+      return res.status(401).json({
+        verified: false,
+        confidence: verification.confidence,
+        message: "Face did not match. Please try again.",
+      });
+    }
+
+    // Issue short-lived face token
     const faceToken = jwt.sign(
       { userId, faceVerified: true },
       JWT_SECRET,
       { expiresIn: FACE_TOKEN_EXPIRY }
     );
-    res.json({ verified: true, faceToken });
+
+    res.json({ verified: true, faceToken, confidence: verification.confidence });
   } catch (err) {
     console.error("Face verify error:", err);
-    res.status(500).json({ message: "Face verification failed" });
+    res.status(500).json({ message: err.message || "Face verification failed" });
+  }
+});
+
+// Admin — reset a user's face registration
+app.delete("/api/admin/users/:id/face", requireAdmin, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (user?.azureFaceId) {
+      // Delete from Azure
+      try {
+        await azureRequest(
+          `/persongroups/${AZURE_PERSON_GROUP}/persons/${user.azureFaceId}`,
+          "DELETE"
+        );
+      } catch (e) {
+        console.warn("Azure delete error (ignored):", e.message);
+      }
+    }
+    await prisma.user.update({
+      where: { id: req.params.id },
+      data: { azureFaceId: null, faceRegistered: false },
+    });
+    res.json({ success: true, message: "Face reset. User must re-register on next login." });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to reset face" });
   }
 });
 
@@ -164,15 +284,10 @@ app.get("/api/admin/users", requireAdmin, async (req, res) => {
         id: true, name: true, email: true, role: true,
         dept: true, color: true, avatarInitials: true,
         officeId: true, office: { select: { name: true } },
-        faceDescriptor: true, createdAt: true,
+        faceRegistered: true, createdAt: true,
       },
     });
-    const mapped = users.map(u => ({
-      ...u,
-      faceRegistered: !!u.faceDescriptor,
-      faceDescriptor: undefined,
-    }));
-    res.json({ users: mapped });
+    res.json({ users });
   } catch (err) { res.status(500).json({ message: "Failed to fetch users" }); }
 });
 
@@ -203,16 +318,6 @@ app.delete("/api/admin/users/:id", requireAdmin, async (req, res) => {
     await prisma.user.delete({ where: { id: req.params.id } });
     res.json({ success: true });
   } catch (err) { res.status(500).json({ message: "Failed to delete user" }); }
-});
-
-app.delete("/api/admin/users/:id/face", requireAdmin, async (req, res) => {
-  try {
-    await prisma.user.update({
-      where: { id: req.params.id },
-      data: { faceDescriptor: null },
-    });
-    res.json({ success: true, message: "Face reset successfully" });
-  } catch (err) { res.status(500).json({ message: "Failed to reset face" }); }
 });
 
 app.get("/api/admin/offices", requireAdmin, async (req, res) => {
@@ -281,7 +386,7 @@ app.get("/api/admin/attendance", requireAdmin, async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-// GPS VALIDATION — now requires faceToken
+// GPS VALIDATION — requires faceToken
 // ══════════════════════════════════════════════════════════════════════════
 
 app.post("/api/attendance/validate-gps", async (req, res) => {
@@ -289,7 +394,6 @@ app.post("/api/attendance/validate-gps", async (req, res) => {
     const { lat, lng, accuracy, userId, faceToken } = req.body;
     if (!lat || !lng || !userId) return res.status(400).json({ message: "Missing required fields" });
 
-    // Face must be verified before GPS
     try { jwt.verify(faceToken, JWT_SECRET); } catch {
       return res.status(403).json({ message: "Face verification expired. Please verify your face first." });
     }
@@ -403,4 +507,5 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`AttendIQ server running on port ${PORT}`);
   console.log(`Origin: ${ORIGIN}`);
+  console.log(`Azure endpoint: ${AZURE_FACE_ENDPOINT}`);
 });

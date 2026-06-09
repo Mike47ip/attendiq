@@ -25,7 +25,8 @@ model User {
   credentials     WebAuthnCredential[]
   attendance      Attendance[]
   challenge       WebAuthnChallenge?
-  faceDescriptor  Json?                // 128-float array from face-api.js
+  azureFaceId     String?              // Azure Face API person ID
+  faceRegistered  Boolean              @default(false)
   createdAt       DateTime             @default(now())
 }
 
