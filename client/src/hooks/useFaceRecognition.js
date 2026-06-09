@@ -3,21 +3,40 @@
 import { useRef, useCallback } from "react";
 import * as faceapi from "face-api.js";
 
-const MODELS_URL = "https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/weights";
+const MODELS_URL = "https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js/weights";
 
-let modelsLoaded = false; // module-level flag — shared across instances
+// Module-level cache — shared across ALL component instances
+// Models load ONCE per browser session, never again
+let modelsLoaded = false;
+let modelsLoadingPromise = null;
 
 export function useFaceRecognition(videoRef) {
   const streamRef = useRef(null);
 
   const loadModels = useCallback(async () => {
+    // Already loaded — return immediately, no wait
     if (modelsLoaded) return;
-    await Promise.all([
+
+    // Already loading elsewhere — wait for that same promise
+    if (modelsLoadingPromise) {
+      await modelsLoadingPromise;
+      return;
+    }
+
+    // First load — kick it off and cache the promise
+    modelsLoadingPromise = Promise.all([
       faceapi.nets.tinyFaceDetector.loadFromUri(MODELS_URL),
       faceapi.nets.faceLandmark68Net.loadFromUri(MODELS_URL),
       faceapi.nets.faceRecognitionNet.loadFromUri(MODELS_URL),
-    ]);
-    modelsLoaded = true;
+    ]).then(() => {
+      modelsLoaded = true;
+      modelsLoadingPromise = null;
+    }).catch(err => {
+      modelsLoadingPromise = null; // allow retry on failure
+      throw new Error("Failed to load face recognition models. Check your connection.");
+    });
+
+    await modelsLoadingPromise;
   }, []);
 
   const startCamera = useCallback(async () => {
