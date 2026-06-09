@@ -1,7 +1,7 @@
 // client/src/components/admin/AdminAttendance.jsx
 
 import { useState, useEffect } from "react";
-import { getAttendanceHistory } from "../../api/attendance";
+import { getAttendanceHistory } from "../../api/auth";
 
 
 export default function AdminAttendance() {
