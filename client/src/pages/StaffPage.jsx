@@ -1,9 +1,10 @@
 // client/src/pages/StaffPage.jsx
 
 import { useState } from "react";
-import { useAuth } from "../context/AuthContext";
+import { useAuth } from "../hooks/useAuth";
 import ClockIn from "../components/ClockIn";
 import StaffHistory from "../components/staff/StaffHistory";
+import FaceRegistration from "../components/FaceRegistration";
 
 const NAV = [
   { key: "clockin", label: "Clock In",   icon: "◉" },
@@ -11,7 +12,7 @@ const NAV = [
 ];
 
 export default function StaffPage() {
-  const { user, logout } = useAuth();
+  const { user, logout, updateUser } = useAuth();
   const [view, setView] = useState("clockin");
 
   const office = user?.office || {
@@ -20,6 +21,17 @@ export default function StaffPage() {
     radiusMetres: 150,
     name: "Head Office",
   };
+
+  // If face not registered yet — show registration screen before anything else
+  if (!user?.faceRegistered) {
+    return (
+      <FaceRegistration
+        userId={user.id}
+        userName={user.name}
+        onComplete={() => updateUser({ faceRegistered: true })}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen bg-zinc-950 text-white flex flex-col pb-16">
@@ -53,7 +65,7 @@ export default function StaffPage() {
         {view === "history" && <StaffHistory userId={user?.id} />}
       </main>
 
-      {/* Fixed bottom nav — mobile first */}
+      {/* Fixed bottom nav */}
       <nav className="fixed bottom-0 left-0 right-0 z-50 bg-zinc-950 border-t border-zinc-800">
         <div className="max-w-lg mx-auto flex">
           {NAV.map(({ key, label, icon }) => (
