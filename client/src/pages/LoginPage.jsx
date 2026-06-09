@@ -1,7 +1,7 @@
 // client/src/pages/LoginPage.jsx
 
 import { useState } from "react";
-import { useAuth } from "../context/AuthContext";
+import { useAuth } from "../hooks/useAuth";
 import { loginUser } from "../api/auth";
 
 export default function LoginPage() {

@@ -9,27 +9,19 @@ import bcrypt from "bcryptjs";
 import pkg from "@prisma/client";
 const { PrismaClient } = pkg;
 import { PrismaPg } from "@prisma/adapter-pg";
-import {
-  generateRegistrationOptions,
-  verifyRegistrationResponse,
-  generateAuthenticationOptions,
-  verifyAuthenticationResponse,
-} from "@simplewebauthn/server";
 
 const app = express();
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
-const RP_NAME = "AttendIQ";
-const RP_ID   = process.env.RP_ID   || "localhost";
 const ORIGIN  = process.env.ORIGIN  || "https://localhost:5173";
 const JWT_SECRET = process.env.JWT_SECRET;
+const FACE_TOKEN_EXPIRY    = "3m";
 const GPS_TOKEN_EXPIRY     = "3m";
-const SESSION_TOKEN_EXPIRY = "1h";
 
 app.use(helmet());
 app.use(cors({ origin: ORIGIN, credentials: true }));
-app.use(json());
+app.use(json({ limit: "2mb" }));
 
 function requireAuth(req, res, next) {
   const token = req.headers.authorization?.split(" ")[1];
@@ -66,6 +58,11 @@ function getAttendanceStatus(clockInTime) {
   return h > 9 || (h === 9 && m > 5) ? "late" : "on-time";
 }
 
+function faceDistance(desc1, desc2) {
+  if (!desc1 || !desc2 || desc1.length !== desc2.length) return Infinity;
+  return Math.sqrt(desc1.reduce((sum, val, i) => sum + (val - desc2[i]) ** 2, 0));
+}
+
 // ══════════════════════════════════════════════════════════════════════════
 // AUTH
 // ══════════════════════════════════════════════════════════════════════════
@@ -89,6 +86,7 @@ app.post("/api/auth/login", async (req, res) => {
         role: user.role, dept: user.dept,
         avatarInitials: user.avatarInitials, color: user.color,
         officeId: user.officeId,
+        faceRegistered: !!user.faceDescriptor,
         office: user.office ? {
           id: user.office.id, name: user.office.name,
           lat: user.office.lat, lng: user.office.lng,
@@ -103,6 +101,58 @@ app.post("/api/auth/login", async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
+// FACE RECOGNITION
+// ══════════════════════════════════════════════════════════════════════════
+
+app.post("/api/auth/face/register", async (req, res) => {
+  try {
+    const { userId, descriptor } = req.body;
+    if (!userId || !descriptor || !Array.isArray(descriptor)) {
+      return res.status(400).json({ message: "userId and descriptor array required" });
+    }
+    if (descriptor.length !== 128) {
+      return res.status(400).json({ message: "Invalid face descriptor" });
+    }
+    await prisma.user.update({
+      where: { id: userId },
+      data: { faceDescriptor: descriptor },
+    });
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Face register error:", err);
+    res.status(500).json({ message: "Failed to register face" });
+  }
+});
+
+app.post("/api/auth/face/verify", async (req, res) => {
+  try {
+    const { userId, descriptor } = req.body;
+    if (!userId || !descriptor || !Array.isArray(descriptor)) {
+      return res.status(400).json({ message: "userId and descriptor required" });
+    }
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) return res.status(404).json({ message: "User not found" });
+    if (!user.faceDescriptor) {
+      return res.status(400).json({ message: "No face registered for this user" });
+    }
+    const distance = faceDistance(descriptor, user.faceDescriptor);
+    const THRESHOLD = 0.6;
+    if (distance > THRESHOLD) {
+      return res.status(401).json({ verified: false, message: "Face did not match. Please try again." });
+    }
+    const faceToken = jwt.sign(
+      { userId, faceVerified: true },
+      JWT_SECRET,
+      { expiresIn: FACE_TOKEN_EXPIRY }
+    );
+    res.json({ verified: true, faceToken });
+  } catch (err) {
+    console.error("Face verify error:", err);
+    res.status(500).json({ message: "Face verification failed" });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
 // ADMIN
 // ══════════════════════════════════════════════════════════════════════════
 
@@ -113,10 +163,16 @@ app.get("/api/admin/users", requireAdmin, async (req, res) => {
       select: {
         id: true, name: true, email: true, role: true,
         dept: true, color: true, avatarInitials: true,
-        officeId: true, office: { select: { name: true } }, createdAt: true,
+        officeId: true, office: { select: { name: true } },
+        faceDescriptor: true, createdAt: true,
       },
     });
-    res.json({ users });
+    const mapped = users.map(u => ({
+      ...u,
+      faceRegistered: !!u.faceDescriptor,
+      faceDescriptor: undefined,
+    }));
+    res.json({ users: mapped });
   } catch (err) { res.status(500).json({ message: "Failed to fetch users" }); }
 });
 
@@ -147,6 +203,16 @@ app.delete("/api/admin/users/:id", requireAdmin, async (req, res) => {
     await prisma.user.delete({ where: { id: req.params.id } });
     res.json({ success: true });
   } catch (err) { res.status(500).json({ message: "Failed to delete user" }); }
+});
+
+app.delete("/api/admin/users/:id/face", requireAdmin, async (req, res) => {
+  try {
+    await prisma.user.update({
+      where: { id: req.params.id },
+      data: { faceDescriptor: null },
+    });
+    res.json({ success: true, message: "Face reset successfully" });
+  } catch (err) { res.status(500).json({ message: "Failed to reset face" }); }
 });
 
 app.get("/api/admin/offices", requireAdmin, async (req, res) => {
@@ -215,13 +281,19 @@ app.get("/api/admin/attendance", requireAdmin, async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-// GPS VALIDATION
+// GPS VALIDATION — now requires faceToken
 // ══════════════════════════════════════════════════════════════════════════
 
 app.post("/api/attendance/validate-gps", async (req, res) => {
   try {
-    const { lat, lng, accuracy, userId } = req.body;
+    const { lat, lng, accuracy, userId, faceToken } = req.body;
     if (!lat || !lng || !userId) return res.status(400).json({ message: "Missing required fields" });
+
+    // Face must be verified before GPS
+    try { jwt.verify(faceToken, JWT_SECRET); } catch {
+      return res.status(403).json({ message: "Face verification expired. Please verify your face first." });
+    }
+
     if (accuracy > 150) return res.status(400).json({ valid: false, message: `GPS accuracy too low (±${accuracy}m). Move to open area.` });
 
     const user = await prisma.user.findUnique({ where: { id: userId }, include: { office: true } });
@@ -240,7 +312,7 @@ app.post("/api/attendance/validate-gps", async (req, res) => {
     }
 
     const gpsToken = jwt.sign(
-      { userId, officeId: office.id, lat, lng, accuracy, distance: Math.round(distance), gpsVerified: true },
+      { userId, officeId: office.id, lat, lng, accuracy, distance: Math.round(distance), gpsVerified: true, faceVerified: true },
       JWT_SECRET,
       { expiresIn: GPS_TOKEN_EXPIRY }
     );
@@ -253,210 +325,33 @@ app.post("/api/attendance/validate-gps", async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-// WEBAUTHN — @simplewebauthn/server v13
-// platform authenticator only — forces device biometric (Face ID, fingerprint, Windows Hello)
-// ══════════════════════════════════════════════════════════════════════════
-
-app.post("/api/auth/register/start", async (req, res) => {
-  try {
-    const { userId, userName } = req.body;
-    const existingCredentials = await prisma.webAuthnCredential.findMany({ where: { userId } });
-
-    const options = await generateRegistrationOptions({
-      rpName: RP_NAME,
-      rpID: RP_ID,
-      userID: new TextEncoder().encode(userId),
-      userName,
-      attestationType: "none",
-      authenticatorSelection: {
-        authenticatorAttachment: "platform",  // device-native ONLY — no Google PM, no USB keys
-        userVerification: "required",          // must use biometric or device PIN
-        residentKey: "required",               // store credential on device
-      },
-      excludeCredentials: existingCredentials.map(c => ({ id: c.credentialId })),
-    });
-
-    await prisma.webAuthnChallenge.upsert({
-      where: { userId },
-      update: { challenge: options.challenge, expiresAt: new Date(Date.now() + 5 * 60 * 1000) },
-      create: { userId, challenge: options.challenge, expiresAt: new Date(Date.now() + 5 * 60 * 1000) },
-    });
-
-    res.json(options);
-  } catch (err) {
-    console.error("Register start error:", err.message);
-    res.status(500).json({ message: err.message || "Failed to generate registration options" });
-  }
-});
-
-app.post("/api/auth/register/finish", async (req, res) => {
-  try {
-    const { userId, credential } = req.body;
-    const challengeRecord = await prisma.webAuthnChallenge.findUnique({ where: { userId } });
-    if (!challengeRecord || challengeRecord.expiresAt < new Date()) {
-      return res.status(400).json({ message: "Challenge expired" });
-    }
-
-    const verification = await verifyRegistrationResponse({
-      response: credential,
-      expectedChallenge: challengeRecord.challenge,
-      expectedOrigin: ORIGIN,
-      expectedRPID: RP_ID,
-    });
-
-    if (!verification.verified || !verification.registrationInfo) {
-      return res.status(400).json({ message: "Registration failed" });
-    }
-
-    const { credential: cred, credentialDeviceType } = verification.registrationInfo;
-
-    await prisma.webAuthnCredential.create({
-      data: {
-        userId,
-        credentialId: Buffer.from(cred.id).toString("base64url"),
-        publicKey:    Buffer.from(cred.publicKey).toString("base64url"),
-        counter:      cred.counter,
-        deviceType:   credentialDeviceType,
-      },
-    });
-
-    await prisma.webAuthnChallenge.delete({ where: { userId } });
-    res.json({ verified: true });
-  } catch (err) {
-    console.error("Register finish error:", err.message);
-    res.status(500).json({ message: err.message || "Registration failed" });
-  }
-});
-
-app.post("/api/auth/login/start", async (req, res) => {
-  try {
-    const { userId, gpsToken } = req.body;
-    try { jwt.verify(gpsToken, JWT_SECRET); } catch {
-      return res.status(403).json({ message: "GPS verification expired. Re-verify location." });
-    }
-
-    const credentials = await prisma.webAuthnCredential.findMany({ where: { userId } });
-    if (credentials.length === 0) {
-      return res.status(404).json({ message: "No biometric registered. Please register first." });
-    }
-
-    const options = await generateAuthenticationOptions({
-      rpID: RP_ID,
-      userVerification: "required",
-      allowCredentials: credentials.map(c => ({ id: c.credentialId })),
-    });
-
-    await prisma.webAuthnChallenge.upsert({
-      where: { userId },
-      update: { challenge: options.challenge, expiresAt: new Date(Date.now() + 3 * 60 * 1000) },
-      create: { userId, challenge: options.challenge, expiresAt: new Date(Date.now() + 3 * 60 * 1000) },
-    });
-
-    res.json(options);
-  } catch (err) {
-    console.error("Login start error:", err.message);
-    res.status(500).json({ message: err.message || "Failed to generate auth options" });
-  }
-});
-
-app.post("/api/auth/login/finish", async (req, res) => {
-  try {
-    const { userId, assertion, gpsToken } = req.body;
-    let gpsPayload;
-    try { gpsPayload = jwt.verify(gpsToken, JWT_SECRET); } catch {
-      return res.status(403).json({ message: "GPS token expired. Re-verify location." });
-    }
-
-    const challengeRecord = await prisma.webAuthnChallenge.findUnique({ where: { userId } });
-    if (!challengeRecord || challengeRecord.expiresAt < new Date()) {
-      return res.status(400).json({ message: "Challenge expired" });
-    }
-
-    const credential = await prisma.webAuthnCredential.findFirst({
-      where: { userId, credentialId: assertion.id },
-    });
-    if (!credential) return res.status(404).json({ message: "Credential not found" });
-
-    const verification = await verifyAuthenticationResponse({
-      response: assertion,
-      expectedChallenge: challengeRecord.challenge,
-      expectedOrigin: ORIGIN,
-      expectedRPID: RP_ID,
-      requireUserVerification: true,
-      credential: {
-        id:        Buffer.from(credential.credentialId, "base64url"),
-        publicKey: Buffer.from(credential.publicKey,    "base64url"),
-        counter:   credential.counter,
-      },
-    });
-
-    if (!verification.verified) return res.status(401).json({ message: "Biometric verification failed" });
-
-    await prisma.webAuthnCredential.update({
-      where: { id: credential.id },
-      data:  { counter: verification.authenticationInfo.newCounter },
-    });
-    await prisma.webAuthnChallenge.delete({ where: { userId } });
-
-    const sessionToken = jwt.sign(
-      {
-        userId, gpsVerified: true, biometricVerified: true,
-        officeId: gpsPayload.officeId,
-        lat: gpsPayload.lat, lng: gpsPayload.lng, accuracy: gpsPayload.accuracy,
-      },
-      JWT_SECRET,
-      { expiresIn: SESSION_TOKEN_EXPIRY }
-    );
-
-    res.json({ verified: true, sessionToken });
-  } catch (err) {
-    console.error("Login finish error:", err.message);
-    res.status(500).json({ message: err.message || "Authentication failed" });
-  }
-});
-
-// ══════════════════════════════════════════════════════════════════════════
-// RE-REGISTRATION — clears old credentials so user can re-register
-// with device biometric after the platform-only fix
-// ══════════════════════════════════════════════════════════════════════════
-
-app.delete("/api/auth/credentials/:userId", requireAdmin, async (req, res) => {
-  try {
-    await prisma.webAuthnCredential.deleteMany({ where: { userId: req.params.userId } });
-    await prisma.webAuthnChallenge.deleteMany({ where: { userId: req.params.userId } });
-    res.json({ success: true, message: "Credentials cleared. User can re-register." });
-  } catch (err) {
-    console.error("Clear credentials error:", err);
-    res.status(500).json({ message: "Failed to clear credentials" });
-  }
-});
-
-// ══════════════════════════════════════════════════════════════════════════
 // ATTENDANCE
 // ══════════════════════════════════════════════════════════════════════════
 
 app.post("/api/attendance/clock-in", async (req, res) => {
   try {
-    const { userId, sessionToken } = req.body;
+    const { userId, gpsToken } = req.body;
     let payload;
-    try { payload = jwt.verify(sessionToken, JWT_SECRET); } catch {
-      return res.status(403).json({ message: "Invalid or expired session token" });
+    try { payload = jwt.verify(gpsToken, JWT_SECRET); } catch {
+      return res.status(403).json({ message: "Session expired. Please start over." });
     }
-    if (!payload.gpsVerified || !payload.biometricVerified) {
-      return res.status(403).json({ message: "GPS and biometric verification required" });
+
+    if (!payload.gpsVerified || !payload.faceVerified) {
+      return res.status(403).json({ message: "Face and GPS verification both required" });
     }
 
     const today = new Date().toISOString().split("T")[0];
     const clockInTime = new Date().toTimeString().slice(0, 5);
+
     const existing = await prisma.attendance.findFirst({ where: { userId, date: today } });
-    if (existing) return res.status(409).json({ message: "Already clocked in today", record: existing });
+    if (existing) return res.status(409).json({ message: "You have already clocked in today", record: existing });
 
     const record = await prisma.attendance.create({
       data: {
         userId, date: today, clockIn: clockInTime,
         status: getAttendanceStatus(clockInTime),
         lat: payload.lat, lng: payload.lng, accuracy: payload.accuracy,
-        gpsVerified: true, biometricVerified: true, officeId: payload.officeId,
+        gpsVerified: true, faceVerified: true, officeId: payload.officeId,
       },
     });
     res.json(record);
@@ -503,17 +398,9 @@ app.get("/api/attendance/history/:userId", async (req, res) => {
   } catch (err) { res.status(500).json({ message: "Failed to fetch history" }); }
 });
 
-app.get("/api/auth/device-status/:userId", async (req, res) => {
-  try {
-    const count = await prisma.webAuthnCredential.count({ where: { userId: req.params.userId } });
-    res.json({ registered: count > 0 });
-  } catch (err) { res.status(500).json({ message: "Failed to check device status" }); }
-});
-
 // ── Start ──────────────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`AttendIQ server running on port ${PORT}`);
-  console.log(`RP_ID: ${RP_ID}`);
   console.log(`Origin: ${ORIGIN}`);
 });

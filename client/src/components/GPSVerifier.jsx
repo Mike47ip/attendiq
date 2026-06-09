@@ -7,27 +7,26 @@ import { validateGPS } from "../api/attendance";
 
 /**
  * GPSVerifier
- * Step 1 of clock-in flow.
- * Shows live GPS status, mini proximity map, and validates with server.
+ * Step 2 of clock-in flow.
+ * Now receives faceToken from FaceVerifier and passes it to the server.
  *
  * Props:
- *   userId      - current staff user id
+ *   userId      - current user id
  *   office      - { lat, lng, radiusMetres, name }
- *   onVerified  - callback(gpsToken) called when server confirms location
- *   onCancel    - callback to abort the flow
+ *   faceToken   - short-lived token from face verification step
+ *   onVerified  - callback(gpsToken) when server confirms location
+ *   onCancel    - callback to go back
  */
-export default function GPSVerifier({ userId, office, onVerified, onCancel }) {
+export default function GPSVerifier({ userId, office, faceToken, onVerified, onCancel }) {
   const gps = useGeolocation();
   const [serverState, setServerState] = useState("idle");
   const [serverError, setServerError] = useState(null);
 
-  // Derived state — no useEffect needed
   const proximity = useMemo(() => {
     if (!gps.lat || !gps.lng) return null;
     return validateProximity(gps.lat, gps.lng, gps.accuracy, office);
   }, [gps.lat, gps.lng, gps.accuracy, office]);
 
-  // Start GPS tracking on mount
   useEffect(() => {
     gps.startTracking();
     return () => gps.stopTracking();
@@ -38,9 +37,11 @@ export default function GPSVerifier({ userId, office, onVerified, onCancel }) {
     setServerError(null);
     try {
       const position = gps.capturePosition(150);
-      const result = await validateGPS({ ...position, userId });
+      // Pass faceToken to server so it can verify face was done first
+      const result = await validateGPS({ ...position, userId, faceToken });
       if (result.valid) {
         setServerState("verified");
+        // gpsToken from server already embeds faceVerified: true
         setTimeout(() => onVerified(result.gpsToken), 800);
       } else {
         setServerState("rejected");
@@ -65,11 +66,11 @@ export default function GPSVerifier({ userId, office, onVerified, onCancel }) {
       {/* Header */}
       <div>
         <p className="text-xs font-semibold uppercase tracking-widest text-zinc-500 mb-1">
-          Step 1 of 2
+          Step 2 of 2
         </p>
         <h2 className="text-lg font-bold text-white">Location Verification</h2>
         <p className="text-sm text-zinc-400 mt-1">
-          Confirm you are at {office.name} before proceeding.
+          Confirm you are at {office.name} before clocking in.
         </p>
       </div>
 
@@ -86,21 +87,15 @@ export default function GPSVerifier({ userId, office, onVerified, onCancel }) {
                   gps.status === "tracking" ? "#4ade80"
                   : gps.status === "acquiring" ? "#fb923c"
                   : "#f87171",
-                boxShadow:
-                  gps.status === "tracking"
-                    ? "0 0 8px #4ade8077"
-                    : "none",
-                animation:
-                  gps.status === "acquiring"
-                    ? "pulse 1s infinite"
-                    : "none",
+                boxShadow: gps.status === "tracking" ? "0 0 8px #4ade8077" : "none",
+                animation: gps.status === "acquiring" ? "pulse 1s infinite" : "none",
               }}
             />
             <span className="text-sm font-semibold text-zinc-300">
-              {gps.status === "idle" && "GPS Off"}
+              {gps.status === "idle"      && "GPS Off"}
               {gps.status === "acquiring" && "Acquiring signal…"}
-              {gps.status === "tracking" && "GPS Active"}
-              {gps.status === "error" && "GPS Error"}
+              {gps.status === "tracking"  && "GPS Active"}
+              {gps.status === "error"     && "GPS Error"}
             </span>
           </div>
           {gps.accuracy && (
@@ -112,18 +107,13 @@ export default function GPSVerifier({ userId, office, onVerified, onCancel }) {
                 background: accuracyColor + "11",
               }}
             >
-              ±{gps.accuracy}m accuracy
+              ±{gps.accuracy}m
             </span>
           )}
         </div>
 
-        {/* SVG Mini Map */}
-        <MiniMap
-          userLat={gps.lat}
-          userLng={gps.lng}
-          office={office}
-          proximity={proximity}
-        />
+        {/* Mini Map */}
+        <MiniMap userLat={gps.lat} userLng={gps.lng} office={office} proximity={proximity} />
 
         {/* Coords */}
         {gps.lat && (
@@ -168,7 +158,6 @@ export default function GPSVerifier({ userId, office, onVerified, onCancel }) {
         )}
       </div>
 
-      {/* Server error */}
       {serverError && (
         <div className="rounded-xl px-4 py-3 text-sm text-red-400 bg-red-950/30 border border-red-900/40">
           {serverError}
@@ -192,20 +181,15 @@ export default function GPSVerifier({ userId, office, onVerified, onCancel }) {
                 ? "linear-gradient(135deg, #052e16, #14532d)"
                 : "linear-gradient(135deg, #4f46e5, #7c3aed)",
             color: serverState === "verified" ? "#4ade80" : "#fff",
-            boxShadow:
-              inRange && gps.status === "tracking"
-                ? "0 4px 20px #4f46e533"
-                : "none",
+            boxShadow: inRange && gps.status === "tracking" ? "0 4px 20px #4f46e533" : "none",
           }}
         >
           {serverState === "checking" && "Verifying location…"}
           {serverState === "verified" && "✓ Location confirmed"}
           {serverState === "idle" && (
-            gps.status !== "tracking"
-              ? "Waiting for GPS signal…"
-              : !inRange
-              ? "Move closer to the office"
-              : "Confirm Location"
+            gps.status !== "tracking" ? "Waiting for GPS signal…"
+            : !inRange ? "Move closer to the office"
+            : "Confirm Location"
           )}
           {serverState === "rejected" && "Retry"}
         </button>
@@ -214,7 +198,7 @@ export default function GPSVerifier({ userId, office, onVerified, onCancel }) {
           onClick={onCancel}
           className="w-full py-3 rounded-2xl text-sm font-medium text-zinc-500 hover:text-zinc-300 transition-colors"
         >
-          Cancel
+          ← Back to Face Scan
         </button>
       </div>
     </div>
@@ -225,19 +209,14 @@ export default function GPSVerifier({ userId, office, onVerified, onCancel }) {
 function MiniMap({ userLat, userLng, office, proximity }) {
   const SIZE = 200;
   const CX = SIZE / 2, CY = SIZE / 2;
-
-  // Scale: radius covers 1/3 of the map
   const scale = (SIZE / 3) / office.radiusMetres;
 
   let userX = null, userY = null;
   if (userLat && userLng) {
     const dx = (userLng - office.lng) * 111320 * Math.cos((office.lat * Math.PI) / 180);
     const dy = (userLat - office.lat) * 110540;
-    userX = CX + dx * scale;
-    userY = CY - dy * scale;
-    // Clamp to map bounds
-    userX = Math.max(8, Math.min(SIZE - 8, userX));
-    userY = Math.max(8, Math.min(SIZE - 8, userY));
+    userX = Math.max(8, Math.min(SIZE - 8, CX + dx * scale));
+    userY = Math.max(8, Math.min(SIZE - 8, CY - dy * scale));
   }
 
   const inRange = proximity?.withinRange;
@@ -245,63 +224,34 @@ function MiniMap({ userLat, userLng, office, proximity }) {
   return (
     <div className="rounded-xl overflow-hidden border border-zinc-800" style={{ background: "#0d1117" }}>
       <svg viewBox={`0 0 ${SIZE} ${SIZE}`} style={{ width: "100%", display: "block" }}>
-        {/* Background grid */}
         {[40, 80, 120, 160].map((v) => (
           <g key={v}>
             <line x1={v} y1={0} x2={v} y2={SIZE} stroke="#21262d" strokeWidth={0.5} />
             <line x1={0} y1={v} x2={SIZE} y2={v} stroke="#21262d" strokeWidth={0.5} />
           </g>
         ))}
-
-        {/* Office radius ring */}
-        <circle
-          cx={CX} cy={CY}
-          r={office.radiusMetres * scale}
+        <circle cx={CX} cy={CY} r={office.radiusMetres * scale}
           fill={inRange === false ? "#ef444408" : "#22c55e08"}
           stroke={inRange === false ? "#ef444433" : "#22c55e33"}
-          strokeWidth={1}
-          strokeDasharray="5 4"
-        />
-
-        {/* Office dot */}
+          strokeWidth={1} strokeDasharray="5 4" />
         <circle cx={CX} cy={CY} r={6} fill="#6366f1" />
         <circle cx={CX} cy={CY} r={10} fill="none" stroke="#6366f133" strokeWidth={1} />
-        <text x={CX} y={CY + 22} textAnchor="middle" fontSize={9} fill="#6e7681">
-          Office
-        </text>
-
-        {/* Line from office to user */}
+        <text x={CX} y={CY + 22} textAnchor="middle" fontSize={9} fill="#6e7681">Office</text>
         {userX && userY && (
-          <line
-            x1={CX} y1={CY} x2={userX} y2={userY}
-            stroke={inRange ? "#22c55e44" : "#ef444444"}
-            strokeWidth={1}
-            strokeDasharray="3 2"
-          />
+          <line x1={CX} y1={CY} x2={userX} y2={userY}
+            stroke={inRange ? "#22c55e44" : "#ef444444"} strokeWidth={1} strokeDasharray="3 2" />
         )}
-
-        {/* User dot */}
         {userX && userY && (
           <g>
-            <circle
-              cx={userX} cy={userY} r={7}
-              fill={inRange ? "#22c55e" : "#ef4444"}
-              style={{ animation: "gpsBlip 1.5s infinite" }}
-            />
-            <circle
-              cx={userX} cy={userY} r={12}
-              fill="none"
-              stroke={inRange ? "#22c55e55" : "#ef444455"}
-              strokeWidth={1}
-              style={{ animation: "gpsRing 2s infinite" }}
-            />
-            <text x={userX} y={userY - 14} textAnchor="middle" fontSize={9} fill={inRange ? "#4ade80" : "#f87171"}>
-              You
-            </text>
+            <circle cx={userX} cy={userY} r={7} fill={inRange ? "#22c55e" : "#ef4444"}
+              style={{ animation: "gpsBlip 1.5s infinite" }} />
+            <circle cx={userX} cy={userY} r={12} fill="none"
+              stroke={inRange ? "#22c55e55" : "#ef444455"} strokeWidth={1}
+              style={{ animation: "gpsRing 2s infinite" }} />
+            <text x={userX} y={userY - 14} textAnchor="middle" fontSize={9}
+              fill={inRange ? "#4ade80" : "#f87171"}>You</text>
           </g>
         )}
-
-        {/* Distance label */}
         {proximity && (
           <text x={SIZE / 2} y={SIZE - 6} textAnchor="middle" fontSize={8} fill="#6e7681">
             {formatDistance(proximity.distance)} away · {office.radiusMetres}m allowed

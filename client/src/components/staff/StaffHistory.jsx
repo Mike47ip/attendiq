@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 
-const BASE = "/api";
+const BASE = import.meta.env.VITE_API_URL || "/api";
 
 export default function StaffHistory({ userId }) {
   const [records, setRecords] = useState([]);
@@ -44,7 +44,6 @@ export default function StaffHistory({ userId }) {
         <p className="text-zinc-500 text-sm mt-1">Last 30 days</p>
       </div>
 
-      {/* Mini stats */}
       <div className="grid grid-cols-3 gap-3">
         {[
           { label: "Total",   value: records.length, color: "#a5b4fc" },
@@ -62,7 +61,6 @@ export default function StaffHistory({ userId }) {
         <div className="text-red-400 text-sm bg-red-950/30 border border-red-900/40 px-4 py-3 rounded-xl">{error}</div>
       )}
 
-      {/* Records */}
       {loading ? (
         <div className="flex flex-col gap-2 animate-pulse">
           {[1,2,3,4,5].map(i => <div key={i} className="h-16 bg-zinc-800 rounded-xl" />)}
@@ -78,8 +76,8 @@ export default function StaffHistory({ userId }) {
               <div>
                 <div className="font-semibold text-sm">{r.date}</div>
                 <div className="flex items-center gap-3 mt-1">
-                  {r.biometricVerified && <span className="text-xs text-indigo-400">🔐 Biometric</span>}
-                  {r.gpsVerified       && <span className="text-xs text-emerald-400">📍 GPS</span>}
+                  {r.faceVerified && <span className="text-xs text-indigo-400">👤 Face</span>}
+                  {r.gpsVerified  && <span className="text-xs text-emerald-400">📍 GPS</span>}
                 </div>
               </div>
               <div className="text-right">

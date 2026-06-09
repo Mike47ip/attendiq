@@ -1,7 +1,7 @@
 // client/src/pages/AdminPage.jsx
 
 import { useState } from "react";
-import { useAuth } from "../context/AuthContext";
+import { useAuth } from "../hooks/useAuth";
 import AdminDashboard from "../components/admin/AdminDashboard";
 import AdminUsers from "../components/admin/AdminUsers";
 import AdminOffices from "../components/admin/AdminOffices";

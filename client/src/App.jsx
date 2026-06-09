@@ -1,6 +1,7 @@
 // client/src/App.jsx
 
-import { AuthProvider, useAuth } from "./context/AuthContext";
+import { AuthProvider } from "./context/AuthProvider";
+import { useAuth } from "./hooks/useAuth";
 import LoginPage from "./pages/LoginPage";
 import AdminPage from "./pages/AdminPage";
 import StaffPage from "./pages/StaffPage";
