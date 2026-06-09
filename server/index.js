@@ -133,7 +133,6 @@ app.post("/api/auth/login", async (req, res) => {
 // AWS REKOGNITION FACE RECOGNITION
 // ══════════════════════════════════════════════════════════════════════════
 
-// Register face — called once on first login
 app.post("/api/auth/face/register", async (req, res) => {
   try {
     const { userId, imageBase64 } = req.body;
@@ -148,29 +147,24 @@ app.post("/api/auth/face/register", async (req, res) => {
       "base64"
     );
 
-    // Index the face into Rekognition collection
     const result = await rekognition.send(new IndexFacesCommand({
       CollectionId: COLLECTION_ID,
       Image: { Bytes: imageBuffer },
-      ExternalImageId: userId, // link face to userId
+      ExternalImageId: userId,
       DetectionAttributes: [],
       MaxFaces: 1,
       QualityFilter: "AUTO",
     }));
 
     if (!result.FaceRecords || result.FaceRecords.length === 0) {
-      return res.status(400).json({ message: "No face detected in image. Please look directly at the camera." });
+      return res.status(400).json({ message: "No face detected. Please look directly at the camera in good lighting." });
     }
 
     const faceId = result.FaceRecords[0].Face.FaceId;
 
-    // Save faceId to database
     await prisma.user.update({
       where: { id: userId },
-      data: {
-        azureFaceId: faceId, // reusing field — stores AWS FaceId
-        faceRegistered: true,
-      },
+      data: { azureFaceId: faceId, faceRegistered: true },
     });
 
     res.json({ success: true });
@@ -180,7 +174,6 @@ app.post("/api/auth/face/register", async (req, res) => {
   }
 });
 
-// Verify face at clock-in
 app.post("/api/auth/face/verify", async (req, res) => {
   try {
     const { userId, imageBase64 } = req.body;
@@ -198,60 +191,44 @@ app.post("/api/auth/face/verify", async (req, res) => {
       "base64"
     );
 
-    // Search for matching face in collection
     const result = await rekognition.send(new SearchFacesByImageCommand({
       CollectionId: COLLECTION_ID,
       Image: { Bytes: imageBuffer },
       MaxFaces: 1,
-      FaceMatchThreshold: 80, // 80% confidence minimum
+      FaceMatchThreshold: 80,
       QualityFilter: "AUTO",
     }));
 
     if (!result.FaceMatches || result.FaceMatches.length === 0) {
-      return res.status(401).json({
-        verified: false,
-        message: "Face did not match. Please try again.",
-      });
+      return res.status(401).json({ verified: false, message: "Face did not match. Please try again." });
     }
 
     const match = result.FaceMatches[0];
-    const confidence = match.Similarity;
 
-    // Verify the matched face belongs to THIS user
     if (match.Face.ExternalImageId !== userId) {
-      return res.status(401).json({
-        verified: false,
-        message: "Face did not match. Please try again.",
-      });
+      return res.status(401).json({ verified: false, message: "Face did not match. Please try again." });
     }
 
-    if (confidence < 80) {
-      return res.status(401).json({
-        verified: false,
-        confidence,
-        message: "Face did not match. Please try again.",
-      });
+    if (match.Similarity < 80) {
+      return res.status(401).json({ verified: false, message: "Face did not match. Please try again." });
     }
 
-    // Issue short-lived face token
     const faceToken = jwt.sign(
       { userId, faceVerified: true },
       JWT_SECRET,
       { expiresIn: FACE_TOKEN_EXPIRY }
     );
 
-    res.json({ verified: true, faceToken, confidence });
+    res.json({ verified: true, faceToken, confidence: match.Similarity });
   } catch (err) {
     console.error("Face verify error:", err);
-    // Handle "no face detected" from AWS
     if (err.name === "InvalidParameterException") {
-      return res.status(401).json({ verified: false, message: "No face detected. Look directly at the camera." });
+      return res.status(401).json({ verified: false, message: "No face detected. Look directly at the camera in good lighting." });
     }
     res.status(500).json({ message: err.message || "Face verification failed" });
   }
 });
 
-// Admin — reset a user's face
 app.delete("/api/admin/users/:id/face", requireAdmin, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({ where: { id: req.params.id } });
@@ -276,7 +253,7 @@ app.delete("/api/admin/users/:id/face", requireAdmin, async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-// ADMIN
+// ADMIN — USERS
 // ══════════════════════════════════════════════════════════════════════════
 
 app.get("/api/admin/users", requireAdmin, async (req, res) => {
@@ -323,6 +300,10 @@ app.delete("/api/admin/users/:id", requireAdmin, async (req, res) => {
   } catch (err) { res.status(500).json({ message: "Failed to delete user" }); }
 });
 
+// ══════════════════════════════════════════════════════════════════════════
+// ADMIN — OFFICES
+// ══════════════════════════════════════════════════════════════════════════
+
 app.get("/api/admin/offices", requireAdmin, async (req, res) => {
   try {
     const offices = await prisma.office.findMany({
@@ -362,6 +343,10 @@ app.delete("/api/admin/offices/:id", requireAdmin, async (req, res) => {
   } catch (err) { res.status(500).json({ message: "Failed to delete office" }); }
 });
 
+// ══════════════════════════════════════════════════════════════════════════
+// ADMIN — STATS
+// ══════════════════════════════════════════════════════════════════════════
+
 app.get("/api/admin/stats/today", requireAdmin, async (req, res) => {
   try {
     const today = new Date().toISOString().split("T")[0];
@@ -389,7 +374,144 @@ app.get("/api/admin/attendance", requireAdmin, async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-// GPS VALIDATION — requires faceToken
+// ADMIN — LEADERBOARD
+// ══════════════════════════════════════════════════════════════════════════
+
+app.get("/api/admin/leaderboard", requireAdmin, async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    if (!startDate || !endDate) {
+      return res.status(400).json({ message: "startDate and endDate required" });
+    }
+
+    const users = await prisma.user.findMany({
+      where: { role: "staff" },
+      select: { id: true, name: true, dept: true, color: true, avatarInitials: true },
+    });
+
+    const records = await prisma.attendance.findMany({
+      where: { date: { gte: startDate, lte: endDate } },
+    });
+
+    const start = new Date(startDate);
+    const end   = new Date(endDate);
+    let workingDays = 0;
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const day = d.getDay();
+      if (day !== 0 && day !== 6) workingDays++;
+    }
+
+    const leaderboard = users.map(user => {
+      const userRecords = records.filter(r => r.userId === user.id);
+      const onTimeCount = userRecords.filter(r => r.status === "on-time").length;
+      const lateCount   = userRecords.filter(r => r.status === "late").length;
+      const totalDays   = userRecords.length;
+      return { userId: user.id, name: user.name, dept: user.dept, color: user.color, avatarInitials: user.avatarInitials, onTimeCount, lateCount, totalDays };
+    });
+
+    leaderboard.sort((a, b) => {
+      if (b.onTimeCount !== a.onTimeCount) return b.onTimeCount - a.onTimeCount;
+      return a.lateCount - b.lateCount;
+    });
+
+    const perfectAttendance = leaderboard.filter(s => s.totalDays === workingDays && s.lateCount === 0).length;
+
+    res.json({ leaderboard, totalStaff: users.length, workingDays, perfectAttendance, period: { startDate, endDate } });
+  } catch (err) {
+    console.error("Leaderboard error:", err);
+    res.status(500).json({ message: "Failed to fetch leaderboard" });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// ADMIN — ANALYTICS
+// ══════════════════════════════════════════════════════════════════════════
+
+app.get("/api/admin/analytics", requireAdmin, async (req, res) => {
+  try {
+    const { startDate, endDate } = req.query;
+    if (!startDate || !endDate) {
+      return res.status(400).json({ message: "startDate and endDate required" });
+    }
+
+    const users = await prisma.user.findMany({
+      where: { role: "staff" },
+      select: { id: true, dept: true },
+    });
+
+    const records = await prisma.attendance.findMany({
+      where: { date: { gte: startDate, lte: endDate } },
+    });
+
+    const totalStaff = users.length;
+    const totalCheckIns = records.length;
+    const totalOnTime   = records.filter(r => r.status === "on-time").length;
+    const totalLate     = records.filter(r => r.status === "late").length;
+
+    const start = new Date(startDate);
+    const end   = new Date(endDate);
+    let workingDays = 0;
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const day = d.getDay();
+      if (day !== 0 && day !== 6) workingDays++;
+    }
+
+    const totalExpected  = totalStaff * workingDays;
+    const totalAbsent    = Math.max(0, totalExpected - totalCheckIns);
+    const attendanceRate = totalExpected > 0 ? Math.round((totalOnTime / totalExpected) * 100) : 0;
+
+    // Daily data
+    const dailyMap = {};
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const dateStr  = d.toISOString().split("T")[0];
+      const dayOfWeek = d.getDay();
+      if (dayOfWeek === 0 || dayOfWeek === 6) continue;
+      dailyMap[dateStr] = {
+        date: dateStr,
+        label: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        onTime: 0, late: 0, absent: totalStaff,
+      };
+    }
+    records.forEach(r => {
+      if (dailyMap[r.date]) {
+        if (r.status === "on-time") dailyMap[r.date].onTime++;
+        else if (r.status === "late") dailyMap[r.date].late++;
+        dailyMap[r.date].absent--;
+      }
+    });
+    const dailyData = Object.values(dailyMap);
+
+    // Pie data
+    const total = totalOnTime + totalLate + totalAbsent;
+    const pieData = [
+      { name: "On Time", value: totalOnTime, fill: "#4ade80", percent: total > 0 ? Math.round((totalOnTime / total) * 100) : 0 },
+      { name: "Late",    value: totalLate,   fill: "#fb923c", percent: total > 0 ? Math.round((totalLate / total) * 100) : 0 },
+      { name: "Absent",  value: totalAbsent, fill: "#f87171", percent: total > 0 ? Math.round((totalAbsent / total) * 100) : 0 },
+    ];
+
+    // Dept breakdown
+    const deptMap = {};
+    users.forEach(u => {
+      if (!deptMap[u.dept]) deptMap[u.dept] = { total: 0, onTime: 0 };
+      deptMap[u.dept].total += workingDays;
+    });
+    records.forEach(r => {
+      const user = users.find(u => u.id === r.userId);
+      if (user && deptMap[user.dept] && r.status === "on-time") deptMap[user.dept].onTime++;
+    });
+    const deptData = Object.entries(deptMap)
+      .map(([dept, { total, onTime }]) => ({ dept, total, onTime, onTimeRate: total > 0 ? Math.round((onTime / total) * 100) : 0 }))
+      .sort((a, b) => b.onTimeRate - a.onTimeRate);
+
+    res.json({ summary: { totalCheckIns, totalOnTime, totalLate, totalAbsent, workingDays, attendanceRate }, dailyData, pieData, deptData });
+  } catch (err) {
+    console.error("Analytics error:", err);
+    res.status(500).json({ message: "Failed to fetch analytics" });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════
+// GPS VALIDATION
 // ══════════════════════════════════════════════════════════════════════════
 
 app.post("/api/attendance/validate-gps", async (req, res) => {
