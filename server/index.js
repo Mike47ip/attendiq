@@ -9,54 +9,49 @@ import bcrypt from "bcryptjs";
 import pkg from "@prisma/client";
 const { PrismaClient } = pkg;
 import { PrismaPg } from "@prisma/adapter-pg";
+import {
+  RekognitionClient,
+  CreateCollectionCommand,
+  IndexFacesCommand,
+  SearchFacesByImageCommand,
+  DeleteFacesCommand,
+} from "@aws-sdk/client-rekognition";
 
 const app = express();
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
-const ORIGIN       = process.env.ORIGIN    || "https://localhost:5173";
-const JWT_SECRET   = process.env.JWT_SECRET;
+const ORIGIN      = process.env.ORIGIN    || "https://localhost:5173";
+const JWT_SECRET  = process.env.JWT_SECRET;
 const FACE_TOKEN_EXPIRY = "10m";
 const GPS_TOKEN_EXPIRY  = "10m";
+const COLLECTION_ID     = "attendiq-faces";
 
-// Azure Face API config
-const AZURE_FACE_KEY      = process.env.AZURE_FACE_KEY;
-const AZURE_FACE_ENDPOINT = process.env.AZURE_FACE_ENDPOINT?.replace(/\/$/, ""); // remove trailing slash
-const AZURE_PERSON_GROUP  = "attendiq-staff"; // one group for all staff
+// AWS Rekognition client
+const rekognition = new RekognitionClient({
+  region: process.env.AWS_REGION || "eu-west-1",
+  credentials: {
+    accessKeyId:     process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  },
+});
 
 app.use(helmet());
 app.use(cors({ origin: ORIGIN, credentials: true }));
-app.use(json({ limit: "10mb" })); // large limit for base64 images
+app.use(json({ limit: "10mb" }));
 
-// ── Azure Face API helpers ─────────────────────────────────────────────────
+// ── Rekognition helpers ────────────────────────────────────────────────────
 
-async function azureRequest(path, method = "GET", body = null) {
-  const url = `${AZURE_FACE_ENDPOINT}/face/v1.0${path}`;
-  const options = {
-    method,
-    headers: {
-      "Ocp-Apim-Subscription-Key": AZURE_FACE_KEY,
-      "Content-Type": body instanceof Buffer ? "application/octet-stream" : "application/json",
-    },
-  };
-  if (body) options.body = body instanceof Buffer ? body : JSON.stringify(body);
-  const res = await fetch(url, options);
-  const text = await res.text();
-  const data = text ? JSON.parse(text) : {};
-  if (!res.ok) throw new Error(data.error?.message || `Azure error: ${res.status}`);
-  return data;
-}
-
-// Ensure person group exists
-async function ensurePersonGroup() {
+async function ensureCollection() {
   try {
-    await azureRequest(`/persongroups/${AZURE_PERSON_GROUP}`);
-  } catch {
-    // Create if doesn't exist
-    await azureRequest(`/persongroups/${AZURE_PERSON_GROUP}`, "PUT", {
-      name: "AttendIQ Staff",
-      recognitionModel: "recognition_04", // latest, most accurate model
-    });
+    await rekognition.send(new CreateCollectionCommand({ CollectionId: COLLECTION_ID }));
+    console.log("Created Rekognition collection:", COLLECTION_ID);
+  } catch (err) {
+    if (err.name === "ResourceAlreadyExistsException") {
+      // Collection exists — fine
+    } else {
+      throw err;
+    }
   }
 }
 
@@ -135,11 +130,10 @@ app.post("/api/auth/login", async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-// AZURE FACE RECOGNITION
+// AWS REKOGNITION FACE RECOGNITION
 // ══════════════════════════════════════════════════════════════════════════
 
 // Register face — called once on first login
-// Receives base64 image, uploads to Azure, stores personId
 app.post("/api/auth/face/register", async (req, res) => {
   try {
     const { userId, imageBase64 } = req.body;
@@ -147,32 +141,34 @@ app.post("/api/auth/face/register", async (req, res) => {
       return res.status(400).json({ message: "userId and imageBase64 required" });
     }
 
-    await ensurePersonGroup();
+    await ensureCollection();
 
-    // Create a person in Azure for this user
-    const person = await azureRequest(
-      `/persongroups/${AZURE_PERSON_GROUP}/persons`,
-      "POST",
-      { name: userId, userData: userId }
+    const imageBuffer = Buffer.from(
+      imageBase64.replace(/^data:image\/\w+;base64,/, ""),
+      "base64"
     );
 
-    // Convert base64 to buffer and add face to person
-    const imageBuffer = Buffer.from(imageBase64.replace(/^data:image\/\w+;base64,/, ""), "base64");
+    // Index the face into Rekognition collection
+    const result = await rekognition.send(new IndexFacesCommand({
+      CollectionId: COLLECTION_ID,
+      Image: { Bytes: imageBuffer },
+      ExternalImageId: userId, // link face to userId
+      DetectionAttributes: [],
+      MaxFaces: 1,
+      QualityFilter: "AUTO",
+    }));
 
-    await azureRequest(
-      `/persongroups/${AZURE_PERSON_GROUP}/persons/${person.personId}/persistedFaces`,
-      "POST",
-      imageBuffer
-    );
+    if (!result.FaceRecords || result.FaceRecords.length === 0) {
+      return res.status(400).json({ message: "No face detected in image. Please look directly at the camera." });
+    }
 
-    // Train the person group
-    await azureRequest(`/persongroups/${AZURE_PERSON_GROUP}/train`, "POST");
+    const faceId = result.FaceRecords[0].Face.FaceId;
 
-    // Save Azure person ID to database
+    // Save faceId to database
     await prisma.user.update({
       where: { id: userId },
       data: {
-        azureFaceId: person.personId,
+        azureFaceId: faceId, // reusing field — stores AWS FaceId
         faceRegistered: true,
       },
     });
@@ -193,41 +189,46 @@ app.post("/api/auth/face/verify", async (req, res) => {
     }
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user?.azureFaceId) {
+    if (!user?.azureFaceId || !user.faceRegistered) {
       return res.status(400).json({ message: "No face registered for this user" });
     }
 
-    // Convert base64 to buffer
-    const imageBuffer = Buffer.from(imageBase64.replace(/^data:image\/\w+;base64,/, ""), "base64");
-
-    // Step 1 — Detect face in the submitted image
-    const detected = await azureRequest(
-      "/detect?detectionModel=detection_03&recognitionModel=recognition_04&returnFaceId=true",
-      "POST",
-      imageBuffer
+    const imageBuffer = Buffer.from(
+      imageBase64.replace(/^data:image\/\w+;base64,/, ""),
+      "base64"
     );
 
-    if (!detected || detected.length === 0) {
-      return res.status(401).json({ verified: false, message: "No face detected in image. Look directly at the camera." });
-    }
+    // Search for matching face in collection
+    const result = await rekognition.send(new SearchFacesByImageCommand({
+      CollectionId: COLLECTION_ID,
+      Image: { Bytes: imageBuffer },
+      MaxFaces: 1,
+      FaceMatchThreshold: 80, // 80% confidence minimum
+      QualityFilter: "AUTO",
+    }));
 
-    if (detected.length > 1) {
-      return res.status(401).json({ verified: false, message: "Multiple faces detected. Only one person should be in frame." });
-    }
-
-    const faceId = detected[0].faceId;
-
-    // Step 2 — Verify face against stored person
-    const verification = await azureRequest("/verify", "POST", {
-      faceId,
-      personGroupId: AZURE_PERSON_GROUP,
-      personId: user.azureFaceId,
-    });
-
-    if (!verification.isIdentical || verification.confidence < 0.7) {
+    if (!result.FaceMatches || result.FaceMatches.length === 0) {
       return res.status(401).json({
         verified: false,
-        confidence: verification.confidence,
+        message: "Face did not match. Please try again.",
+      });
+    }
+
+    const match = result.FaceMatches[0];
+    const confidence = match.Similarity;
+
+    // Verify the matched face belongs to THIS user
+    if (match.Face.ExternalImageId !== userId) {
+      return res.status(401).json({
+        verified: false,
+        message: "Face did not match. Please try again.",
+      });
+    }
+
+    if (confidence < 80) {
+      return res.status(401).json({
+        verified: false,
+        confidence,
         message: "Face did not match. Please try again.",
       });
     }
@@ -239,26 +240,29 @@ app.post("/api/auth/face/verify", async (req, res) => {
       { expiresIn: FACE_TOKEN_EXPIRY }
     );
 
-    res.json({ verified: true, faceToken, confidence: verification.confidence });
+    res.json({ verified: true, faceToken, confidence });
   } catch (err) {
     console.error("Face verify error:", err);
+    // Handle "no face detected" from AWS
+    if (err.name === "InvalidParameterException") {
+      return res.status(401).json({ verified: false, message: "No face detected. Look directly at the camera." });
+    }
     res.status(500).json({ message: err.message || "Face verification failed" });
   }
 });
 
-// Admin — reset a user's face registration
+// Admin — reset a user's face
 app.delete("/api/admin/users/:id/face", requireAdmin, async (req, res) => {
   try {
     const user = await prisma.user.findUnique({ where: { id: req.params.id } });
     if (user?.azureFaceId) {
-      // Delete from Azure
       try {
-        await azureRequest(
-          `/persongroups/${AZURE_PERSON_GROUP}/persons/${user.azureFaceId}`,
-          "DELETE"
-        );
+        await rekognition.send(new DeleteFacesCommand({
+          CollectionId: COLLECTION_ID,
+          FaceIds: [user.azureFaceId],
+        }));
       } catch (e) {
-        console.warn("Azure delete error (ignored):", e.message);
+        console.warn("AWS delete face warning:", e.message);
       }
     }
     await prisma.user.update({
@@ -506,5 +510,5 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`AttendIQ server running on port ${PORT}`);
   console.log(`Origin: ${ORIGIN}`);
-  console.log(`Azure endpoint: ${AZURE_FACE_ENDPOINT}`);
+  console.log(`AWS Region: ${process.env.AWS_REGION}`);
 });
