@@ -9,7 +9,6 @@ import bcrypt from "bcryptjs";
 import pkg from "@prisma/client";
 const { PrismaClient } = pkg;
 import { PrismaPg } from "@prisma/adapter-pg";
-import fetch from "node-fetch";
 
 const app = express();
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
