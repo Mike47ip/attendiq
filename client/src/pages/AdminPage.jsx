@@ -6,12 +6,16 @@ import AdminDashboard from "../components/admin/AdminDashboard";
 import AdminUsers from "../components/admin/AdminUsers";
 import AdminOffices from "../components/admin/AdminOffices";
 import AdminAttendance from "../components/admin/AdminAttendance";
+import AdminLeaderboard from "../components/admin/AdminLeaderboard";
+import AdminAnalytics from "../components/admin/AdminAnalytics";
 
 const NAV = [
-  { key: "dashboard",  label: "Dashboard",  icon: "⬡" },
-  { key: "users",      label: "Staff",       icon: "◈" },
-  { key: "offices",    label: "Offices",     icon: "◎" },
-  { key: "attendance", label: "Attendance",  icon: "◫" },
+  { key: "dashboard",   label: "Dashboard",   icon: "⬡" },
+  { key: "users",       label: "Staff",        icon: "◈" },
+  { key: "offices",     label: "Offices",      icon: "◎" },
+  { key: "attendance",  label: "Attendance",   icon: "◫" },
+  { key: "analytics",   label: "Analytics",    icon: "📊" },
+  { key: "leaderboard", label: "Leaderboard",  icon: "🏆" },
 ];
 
 export default function AdminPage() {
@@ -70,10 +74,12 @@ export default function AdminPage() {
 
       {/* Content */}
       <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8">
-        {view === "dashboard"  && <AdminDashboard />}
-        {view === "users"      && <AdminUsers />}
-        {view === "offices"    && <AdminOffices />}
-        {view === "attendance" && <AdminAttendance />}
+        {view === "dashboard"   && <AdminDashboard />}
+        {view === "users"       && <AdminUsers />}
+        {view === "offices"     && <AdminOffices />}
+        {view === "attendance"  && <AdminAttendance />}
+        {view === "analytics"   && <AdminAnalytics />}
+        {view === "leaderboard" && <AdminLeaderboard />}
       </main>
 
       {/* Mobile bottom nav — hidden on desktop */}
@@ -83,15 +89,15 @@ export default function AdminPage() {
             <button
               key={key}
               onClick={() => setView(key)}
-              className="flex-1 flex flex-col items-center justify-center py-3 gap-1 transition-all"
+              className="flex-1 flex flex-col items-center justify-center py-3 gap-0.5 transition-all"
               style={{
                 color: view === key ? "#818cf8" : "#52525b",
                 borderTop: view === key ? "2px solid #818cf8" : "2px solid transparent",
                 marginTop: -1,
               }}
             >
-              <span style={{ fontSize: 20 }}>{icon}</span>
-              <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.03em" }}>
+              <span style={{ fontSize: 16 }}>{icon}</span>
+              <span style={{ fontSize: 9, fontWeight: 600, letterSpacing: "0.02em" }}>
                 {label}
               </span>
             </button>
