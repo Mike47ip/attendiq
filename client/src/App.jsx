@@ -5,6 +5,7 @@ import { useAuth } from "./hooks/useAuth";
 import LoginPage from "./pages/LoginPage";
 import AdminPage from "./pages/AdminPage";
 import StaffPage from "./pages/StaffPage";
+import SuperAdminPage from "./pages/SuperAdminPage";
 
 function AppRouter() {
   const { user, loading } = useAuth();
@@ -18,6 +19,7 @@ function AppRouter() {
   }
 
   if (!user) return <LoginPage />;
+  if (user.role === "superadmin") return <SuperAdminPage />;
   if (user.role === "admin") return <AdminPage />;
   return <StaffPage />;
 }
