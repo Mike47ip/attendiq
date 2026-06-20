@@ -39,6 +39,10 @@ export async function getAllUsers() {
   return request("/admin/users");
 }
 
+export async function updateUser(userId, data) {
+  return request(`/admin/users/${userId}`, { method: "PUT", body: data });
+}
+
 export async function deleteUser(userId) {
   return request(`/admin/users/${userId}`, { method: "DELETE" });
 }
