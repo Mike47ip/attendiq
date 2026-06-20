@@ -278,6 +278,68 @@ app.get("/api/superadmin/stats", requireSuperAdmin, async (req, res) => {
   } catch (err) { res.status(500).json({ message: "Failed to fetch stats" }); }
 });
 
+
+// Get all users across all tenants (with tenant info)
+app.get("/api/superadmin/users", requireSuperAdmin, async (req, res) => {
+  try {
+    const users = await prisma.user.findMany({
+      orderBy: { createdAt: "desc" },
+      select: {
+        id: true, name: true, email: true, role: true, dept: true,
+        color: true, avatarInitials: true, officeId: true,
+        office: { select: { name: true } },
+        faceRegistered: true, tenantId: true, createdAt: true,
+        tenant: { select: { name: true, slug: true } },
+      },
+    });
+    res.json({ users });
+  } catch (err) { res.status(500).json({ message: "Failed to fetch users" }); }
+});
+
+// Update any user across any tenant
+app.put("/api/superadmin/users/:id", requireSuperAdmin, async (req, res) => {
+  try {
+    const { name, email, role, dept, officeId, color, avatarInitials, password } = req.body;
+    if (!name || !email) return res.status(400).json({ message: "Name and email required" });
+
+    const existing = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    if (existing && existing.id !== req.params.id) {
+      return res.status(409).json({ message: "Email already in use by another user" });
+    }
+
+    const data = {
+      name, email: email.toLowerCase(), role, dept,
+      officeId: officeId || null, color,
+      avatarInitials: avatarInitials || name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2),
+    };
+    if (password) data.password = await bcrypt.hash(password, 10);
+
+    const user = await prisma.user.update({
+      where: { id: req.params.id },
+      data,
+      select: {
+        id: true, name: true, email: true, role: true, dept: true,
+        color: true, avatarInitials: true, officeId: true,
+        office: { select: { name: true } }, faceRegistered: true,
+        tenantId: true, createdAt: true,
+        tenant: { select: { name: true, slug: true } },
+      },
+    });
+    res.json({ user });
+  } catch (err) {
+    console.error("Superadmin update user error:", err);
+    res.status(500).json({ message: "Failed to update user" });
+  }
+});
+
+// Delete any user across any tenant
+app.delete("/api/superadmin/users/:id", requireSuperAdmin, async (req, res) => {
+  try {
+    await prisma.user.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ message: "Failed to delete user" }); }
+});
+
 // ══════════════════════════════════════════════════════════════════════════
 // FACE RECOGNITION
 // ══════════════════════════════════════════════════════════════════════════
