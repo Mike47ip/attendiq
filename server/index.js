@@ -338,8 +338,56 @@ app.delete("/api/superadmin/users/:id", requireSuperAdmin, async (req, res) => {
     await prisma.user.delete({ where: { id: req.params.id } });
     res.json({ success: true });
   } catch (err) { res.status(500).json({ message: "Failed to delete user" }); }
+
 });
 
+// Create a new user as superadmin, assignable to any tenant (or none)
+app.post("/api/superadmin/users", requireSuperAdmin, async (req, res) => {
+  try {
+    const { name, email, password, role, dept, tenantId, officeId, color, avatarInitials } = req.body;
+    if (!name || !email || !password) {
+      return res.status(400).json({ message: "Name, email and password required" });
+    }
+
+    const existing = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    if (existing) return res.status(409).json({ message: "Email already exists" });
+
+    // If an office is provided, confirm it actually belongs to the selected tenant
+    if (officeId) {
+      if (!tenantId) return res.status(400).json({ message: "Cannot assign an office without a tenant" });
+      const office = await prisma.office.findUnique({ where: { id: officeId } });
+      if (!office || office.tenantId !== tenantId) {
+        return res.status(400).json({ message: "Office does not belong to the selected tenant" });
+      }
+    }
+
+    const hashed = await bcrypt.hash(password, 10);
+    const user = await prisma.user.create({
+      data: {
+        tenantId: tenantId || null,
+        name,
+        email: email.toLowerCase(),
+        password: hashed,
+        role: role || "staff",
+        dept: dept || "General",
+        officeId: officeId || null,
+        color: color || "#6366f1",
+        avatarInitials: avatarInitials || name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2),
+      },
+      select: {
+        id: true, name: true, email: true, role: true, dept: true,
+        color: true, avatarInitials: true, officeId: true,
+        office: { select: { name: true } }, faceRegistered: true,
+        tenantId: true, createdAt: true,
+        tenant: { select: { name: true, slug: true } },
+      },
+    });
+    res.status(201).json({ user });
+  } catch (err) {
+    console.error("Superadmin create user error:", err);
+    res.status(500).json({ message: "Failed to create user" });
+  }
+});
 // ══════════════════════════════════════════════════════════════════════════
 // FACE RECOGNITION
 // ══════════════════════════════════════════════════════════════════════════
@@ -463,6 +511,52 @@ app.post("/api/admin/users", requireAdmin, async (req, res) => {
   } catch (err) {
     console.error("Create user error:", err);
     res.status(500).json({ message: "Failed to create user" });
+  }
+});
+
+
+app.put("/api/admin/users/:id", requireAdmin, async (req, res) => {
+  try {
+    const { name, email, role, dept, officeId, color, avatarInitials, password } = req.body;
+    if (!name || !email) return res.status(400).json({ message: "Name and email required" });
+
+    const target = await prisma.user.findUnique({ where: { id: req.params.id } });
+    if (!target) return res.status(404).json({ message: "User not found" });
+
+    if (req.user.role !== "superadmin" && target.tenantId !== req.user.tenantId) {
+      return res.status(403).json({ message: "Cannot edit a user outside your company" });
+    }
+
+    const existing = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    if (existing && existing.id !== req.params.id) {
+      return res.status(409).json({ message: "Email already in use by another user" });
+    }
+
+    const data = {
+      name,
+      email: email.toLowerCase(),
+      role,
+      dept,
+      officeId: officeId || null,
+      color,
+      avatarInitials: avatarInitials || name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2),
+    };
+    if (password) data.password = await bcrypt.hash(password, 10);
+
+    const user = await prisma.user.update({
+      where: { id: req.params.id },
+      data,
+      select: {
+        id: true, name: true, email: true, role: true,
+        dept: true, color: true, avatarInitials: true,
+        officeId: true, office: { select: { name: true } },
+        faceRegistered: true, tenantId: true, createdAt: true,
+      },
+    });
+    res.json({ user });
+  } catch (err) {
+    console.error("Update user error:", err);
+    res.status(500).json({ message: "Failed to update user" });
   }
 });
 
