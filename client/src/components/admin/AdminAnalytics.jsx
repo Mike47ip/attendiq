@@ -1,6 +1,6 @@
 // client/src/components/admin/AdminAnalytics.jsx
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer, PieChart, Pie, Cell,
@@ -8,14 +8,12 @@ import {
 
 const BASE = import.meta.env.VITE_API_URL || "/api";
 
-async function getAnalytics({ startDate, endDate }) {
+async function getAnalytics({ startDate, endDate, officeId }) {
   const token = localStorage.getItem("attendiq_token");
   const params = new URLSearchParams({ startDate, endDate });
+  if (officeId) params.set("officeId", officeId);
   const res = await fetch(`${BASE}/admin/analytics?${params}`, {
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
     credentials: "include",
   });
   const data = await res.json();
@@ -23,19 +21,17 @@ async function getAnalytics({ startDate, endDate }) {
   return data;
 }
 
-// Compute stable date strings outside component
 function getDateStrings() {
   const now = new Date();
   const today = now.toISOString().split("T")[0];
   const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
-  const last7  = new Date(now - 7  * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
   const last30 = new Date(now - 30 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
   const monday = (() => {
     const d = new Date(now);
     d.setDate(d.getDate() - ((d.getDay() + 6) % 7));
     return d.toISOString().split("T")[0];
   })();
-  return { today, firstOfMonth, last7, last30, monday };
+  return { today, firstOfMonth, last30, monday };
 }
 
 const DATES = getDateStrings();
@@ -69,61 +65,69 @@ function PieTooltip({ active, payload }) {
   );
 }
 
-export default function AdminAnalytics() {
+export default function AdminAnalytics({ officeId = "", offices = [] }) {
   const [startDate, setStartDate] = useState(DATES.firstOfMonth);
   const [endDate, setEndDate]     = useState(DATES.today);
   const [data, setData]           = useState(null);
   const [loading, setLoading]     = useState(true);
   const [error, setError]         = useState(null);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await getAnalytics({ startDate, endDate });
-      setData(res);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
+  // Single useEffect — no useCallback needed
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await getAnalytics({ startDate, endDate, officeId });
+        if (!cancelled) setData(res);
+      } catch (err) {
+        if (!cancelled) setError(err.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     }
-  }, [startDate, endDate]);
-
-  useEffect(() => { fetchData(); }, [fetchData]);
+    load();
+    return () => { cancelled = true; };
+  }, [startDate, endDate, officeId]);
 
   const quickFilters = [
-    { label: "This Week",    start: DATES.monday,      end: DATES.today },
+    { label: "This Week",    start: DATES.monday,       end: DATES.today },
     { label: "This Month",   start: DATES.firstOfMonth, end: DATES.today },
     { label: "Last 30 Days", start: DATES.last30,       end: DATES.today },
   ];
 
+  const officeName = officeId ? offices.find(o => o.id === officeId)?.name : null;
+
   return (
     <div className="flex flex-col gap-6">
-
-      {/* Header */}
       <div>
         <h1 className="text-xl font-black tracking-tight">Analytics</h1>
-        <p className="text-zinc-500 text-sm mt-1">Attendance insights and trends</p>
+        <p className="text-zinc-500 text-sm mt-1">
+          Attendance insights and trends
+          {officeName && (
+            <span className="ml-2 text-xs bg-indigo-950 text-indigo-400 border border-indigo-800 px-2 py-0.5 rounded-full">
+              {officeName}
+            </span>
+          )}
+        </p>
       </div>
 
       {/* Date filters */}
       <div className="flex flex-wrap gap-3 items-end">
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">From</label>
-          <input type="date" value={startDate}
-            onChange={e => setStartDate(e.target.value)}
+          <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
             className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-white text-sm outline-none focus:border-indigo-500" />
         </div>
         <div className="flex flex-col gap-1.5">
           <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">To</label>
-          <input type="date" value={endDate}
-            onChange={e => setEndDate(e.target.value)}
+          <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)}
             className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-2 text-white text-sm outline-none focus:border-indigo-500" />
         </div>
         <div className="flex gap-2 flex-wrap">
           {quickFilters.map(({ label, start, end }) => (
-            <button key={label}
-              onClick={() => { setStartDate(start); setEndDate(end); }}
+            <button key={label} onClick={() => { setStartDate(start); setEndDate(end); }}
               className="px-3 py-2 rounded-xl text-xs font-semibold transition-all whitespace-nowrap"
               style={{
                 background: startDate === start && endDate === end ? "rgba(99,102,241,0.2)" : "transparent",
@@ -141,7 +145,6 @@ export default function AdminAnalytics() {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[1,2,3,4].map(i => <div key={i} className="h-24 bg-zinc-800 rounded-2xl" />)}
           </div>
-          <div className="h-64 bg-zinc-800 rounded-2xl" />
           <div className="h-64 bg-zinc-800 rounded-2xl" />
         </div>
       ) : error ? (
@@ -186,8 +189,6 @@ export default function AdminAnalytics() {
 
           {/* Pie + Dept row */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-
-            {/* Donut */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
               <h2 className="font-bold text-sm text-white mb-1">Attendance Breakdown</h2>
               <p className="text-zinc-500 text-xs mb-4">On-time vs Late vs Absent</p>
@@ -196,11 +197,8 @@ export default function AdminAnalytics() {
               ) : (
                 <ResponsiveContainer width="100%" height={200}>
                   <PieChart>
-                    <Pie data={data.pieData} cx="50%" cy="50%"
-                      innerRadius={50} outerRadius={80} paddingAngle={3} dataKey="value">
-                      {data.pieData.map((entry, i) => (
-                        <Cell key={i} fill={entry.fill} />
-                      ))}
+                    <Pie data={data.pieData} cx="50%" cy="50%" innerRadius={50} outerRadius={80} paddingAngle={3} dataKey="value">
+                      {data.pieData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
                     </Pie>
                     <Tooltip content={<PieTooltip />} />
                   </PieChart>
@@ -222,7 +220,6 @@ export default function AdminAnalytics() {
               </div>
             </div>
 
-            {/* Dept breakdown */}
             <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
               <h2 className="font-bold text-sm text-white mb-1">By Department</h2>
               <p className="text-zinc-500 text-xs mb-4">On-time rate per department</p>
@@ -259,7 +256,9 @@ export default function AdminAnalytics() {
             <div className="flex justify-between items-center mb-3">
               <div>
                 <h2 className="font-bold text-sm text-white">Overall Punctuality Score</h2>
-                <p className="text-zinc-500 text-xs mt-0.5">{startDate} → {endDate}</p>
+                <p className="text-zinc-500 text-xs mt-0.5">
+                  {startDate} → {endDate}{officeName ? ` · ${officeName}` : ""}
+                </p>
               </div>
               <div className="text-3xl font-black" style={{
                 color: data.summary.attendanceRate >= 80 ? "#4ade80"
