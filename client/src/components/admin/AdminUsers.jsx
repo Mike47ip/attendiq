@@ -5,7 +5,13 @@ import { getAllUsers, createStaffUser, updateUser, deleteUser, getAllOffices } f
 
 const COLORS = ["#6366f1","#ec4899","#f59e0b","#10b981","#3b82f6","#f43f5e","#8b5cf6","#06b6d4"];
 const DEPTS  = ["Tech","Creative","Finance","HR","Operations","Marketing","Sales"];
-const ROLES = ["staff", "admin", "manager", "supervisor"];
+const ROLES  = ["staff", "admin", "manager", "supervisor"];
+
+const EMPTY_FORM = {
+  name: "", username: "", email: "", password: "",
+  role: "staff", dept: "Tech",
+  officeId: "", color: COLORS[0],
+};
 
 export default function AdminUsers() {
   const [users, setUsers]       = useState([]);
@@ -15,17 +21,13 @@ export default function AdminUsers() {
   const [deleting, setDeleting] = useState(null);
   const [error, setError]       = useState("");
 
-  const [form, setForm] = useState({
-    name: "", email: "", password: "",
-    role: "staff", dept: "Tech",
-    officeId: "", color: COLORS[0],
-  });
-  const [saving, setSaving] = useState(false);
+  const [form, setForm]           = useState(EMPTY_FORM);
+  const [saving, setSaving]       = useState(false);
   const [showStaffPass, setShowStaffPass] = useState(false);
 
   // ── Inline edit state ────────────────────────────────────────────────
-  const [editingId, setEditingId] = useState(null);
-  const [editForm, setEditForm]   = useState(null);
+  const [editingId, setEditingId]   = useState(null);
+  const [editForm, setEditForm]     = useState(null);
   const [editSaving, setEditSaving] = useState(false);
   const [showEditPass, setShowEditPass] = useState(false);
 
@@ -55,11 +57,13 @@ export default function AdminUsers() {
     try {
       const payload = {
         ...form,
+        email: form.email || null,
         avatarInitials: getInitials(form.name),
       };
       await createStaffUser(payload);
       setShowForm(false);
-      setForm({ name: "", email: "", password: "", role: "staff", dept: "Tech", officeId: "", color: COLORS[0] });
+      setForm(EMPTY_FORM);
+      setShowStaffPass(false);
       fetchData();
     } catch (err) {
       setError(err.message);
@@ -85,13 +89,14 @@ export default function AdminUsers() {
     setEditingId(u.id);
     setShowEditPass(false);
     setEditForm({
-      name: u.name,
-      email: u.email,
-      role: u.role,
-      dept: u.dept,
+      name:     u.name,
+      username: u.username,
+      email:    u.email || "",
+      role:     u.role,
+      dept:     u.dept,
       officeId: u.officeId || "",
-      color: u.color,
-      password: "", // blank = leave unchanged
+      color:    u.color,
+      password: "",
     });
   }
 
@@ -106,9 +111,9 @@ export default function AdminUsers() {
     try {
       const payload = {
         ...editForm,
+        email: editForm.email || null,
         avatarInitials: getInitials(editForm.name),
       };
-      // Don't send an empty password field
       if (!payload.password) delete payload.password;
 
       const { user } = await updateUser(userId, payload);
@@ -150,25 +155,40 @@ export default function AdminUsers() {
         <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
           <h2 className="font-bold text-sm mb-4">New Staff Member</h2>
           <form onSubmit={handleCreate} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+
             <Field label="Full Name">
               <input
                 type="text" required placeholder="e.g. Amara Osei"
-                value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
+                value={form.name}
+                onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
                 className="input-field"
               />
             </Field>
-            <Field label="Email">
+
+            <Field label="Username">
               <input
-                type="email" required placeholder="amara@company.com"
-                value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))}
+                type="text" required placeholder="e.g. amara.osei"
+                value={form.username}
+                onChange={e => setForm(p => ({ ...p, username: e.target.value.toLowerCase().replace(/\s+/g, "") }))}
                 className="input-field"
               />
             </Field>
+
+            <Field label="Email (optional)">
+              <input
+                type="email" placeholder="amara@company.com"
+                value={form.email}
+                onChange={e => setForm(p => ({ ...p, email: e.target.value }))}
+                className="input-field"
+              />
+            </Field>
+
             <Field label="Password">
               <div className="relative">
                 <input
                   type={showStaffPass ? "text" : "password"} required placeholder="Temp password"
-                  value={form.password} onChange={e => setForm(p => ({ ...p, password: e.target.value }))}
+                  value={form.password}
+                  onChange={e => setForm(p => ({ ...p, password: e.target.value }))}
                   className="input-field" style={{ paddingRight: 40 }}
                 />
                 <button
@@ -176,37 +196,40 @@ export default function AdminUsers() {
                   onClick={() => setShowStaffPass(p => !p)}
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-200 transition-colors"
                 >
-                  {showStaffPass ? (
-                    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                      <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/>
-                      <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/>
-                      <line x1="1" y1="1" x2="23" y2="23"/>
-                    </svg>
-                  ) : (
-                    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                      <circle cx="12" cy="12" r="3"/>
-                    </svg>
-                  )}
+                  {showStaffPass ? <EyeOffIcon /> : <EyeIcon />}
                 </button>
               </div>
             </Field>
+
             <Field label="Department">
-              <select value={form.dept} onChange={e => setForm(p => ({ ...p, dept: e.target.value }))} className="input-field">
+              <select
+                value={form.dept}
+                onChange={e => setForm(p => ({ ...p, dept: e.target.value }))}
+                className="input-field"
+              >
                 {DEPTS.map(d => <option key={d}>{d}</option>)}
               </select>
             </Field>
+
             <Field label="Role">
-              <select value={form.role} onChange={e => setForm(p => ({ ...p, role: e.target.value }))} className="input-field">
+              <select
+                value={form.role}
+                onChange={e => setForm(p => ({ ...p, role: e.target.value }))}
+                className="input-field"
+              >
                 {ROLES.map(r => (
-                  <option key={r} value={r}>
-                    {r.charAt(0).toUpperCase() + r.slice(1)}
-                  </option>
+                  <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>
                 ))}
               </select>
             </Field>
+
             <Field label="Office">
-              <select value={form.officeId} onChange={e => setForm(p => ({ ...p, officeId: e.target.value }))} className="input-field" required>
+              <select
+                value={form.officeId}
+                onChange={e => setForm(p => ({ ...p, officeId: e.target.value }))}
+                className="input-field"
+                required
+              >
                 <option value="">Select office</option>
                 {offices.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
               </select>
@@ -234,14 +257,16 @@ export default function AdminUsers() {
             {/* Preview */}
             <div className="sm:col-span-2 flex items-center gap-3 bg-zinc-800 rounded-xl px-4 py-3">
               <div
-                className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold"
+                className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
                 style={{ background: form.color + "22", color: form.color, border: `2px solid ${form.color}55` }}
               >
                 {form.name ? getInitials(form.name) : "?"}
               </div>
-              <div>
-                <div className="font-semibold text-sm">{form.name || "Staff Name"}</div>
-                <div className="text-xs text-zinc-500">{form.role} · {form.dept}</div>
+              <div className="min-w-0">
+                <div className="font-semibold text-sm truncate">{form.name || "Staff Name"}</div>
+                <div className="text-xs text-zinc-500 truncate">
+                  {form.username ? `@${form.username}` : "@username"} · {form.role} · {form.dept}
+                </div>
               </div>
             </div>
 
@@ -254,7 +279,8 @@ export default function AdminUsers() {
                 {saving ? "Creating…" : "Create Staff Member"}
               </button>
               <button
-                type="button" onClick={() => setShowForm(false)}
+                type="button"
+                onClick={() => { setShowForm(false); setForm(EMPTY_FORM); setShowStaffPass(false); }}
                 className="px-4 py-3 rounded-xl text-sm font-medium text-zinc-400 border border-zinc-700"
               >
                 Cancel
@@ -267,7 +293,7 @@ export default function AdminUsers() {
       {/* Users list */}
       {loading ? (
         <div className="flex flex-col gap-2 animate-pulse">
-          {[1,2,3].map(i => <div key={i} className="h-16 bg-zinc-800 rounded-xl" />)}
+          {[1, 2, 3].map(i => <div key={i} className="h-16 bg-zinc-800 rounded-xl" />)}
         </div>
       ) : users.length === 0 ? (
         <div className="text-center py-16 text-zinc-600 text-sm border border-dashed border-zinc-800 rounded-2xl">
@@ -282,6 +308,7 @@ export default function AdminUsers() {
               return (
                 <div key={u.id} className="bg-zinc-900 border border-indigo-700/60 rounded-xl px-4 py-4 flex flex-col gap-3">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+
                     <Field label="Full Name">
                       <input
                         type="text" value={editForm.name}
@@ -289,13 +316,24 @@ export default function AdminUsers() {
                         className="input-field"
                       />
                     </Field>
-                    <Field label="Email">
+
+                    <Field label="Username">
+                      <input
+                        type="text" value={editForm.username}
+                        onChange={e => setEditForm(p => ({ ...p, username: e.target.value.toLowerCase().replace(/\s+/g, "") }))}
+                        className="input-field"
+                      />
+                    </Field>
+
+                    <Field label="Email (optional)">
                       <input
                         type="email" value={editForm.email}
+                        placeholder="Leave blank if not needed"
                         onChange={e => setEditForm(p => ({ ...p, email: e.target.value }))}
                         className="input-field"
                       />
                     </Field>
+
                     <Field label="Department">
                       <select
                         value={editForm.dept}
@@ -305,6 +343,7 @@ export default function AdminUsers() {
                         {DEPTS.map(d => <option key={d}>{d}</option>)}
                       </select>
                     </Field>
+
                     <Field label="Role">
                       <select
                         value={editForm.role}
@@ -316,6 +355,7 @@ export default function AdminUsers() {
                         ))}
                       </select>
                     </Field>
+
                     <Field label="Office">
                       <select
                         value={editForm.officeId}
@@ -326,11 +366,12 @@ export default function AdminUsers() {
                         {offices.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
                       </select>
                     </Field>
+
                     <Field label="New Password (optional)">
                       <div className="relative">
                         <input
                           type={showEditPass ? "text" : "password"}
-                          placeholder="Leave blank to keep current password"
+                          placeholder="Leave blank to keep current"
                           value={editForm.password}
                           onChange={e => setEditForm(p => ({ ...p, password: e.target.value }))}
                           className="input-field" style={{ paddingRight: 40 }}
@@ -340,18 +381,7 @@ export default function AdminUsers() {
                           onClick={() => setShowEditPass(p => !p)}
                           className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-200 transition-colors"
                         >
-                          {showEditPass ? (
-                            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                              <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94"/>
-                              <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19"/>
-                              <line x1="1" y1="1" x2="23" y2="23"/>
-                            </svg>
-                          ) : (
-                            <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                              <circle cx="12" cy="12" r="3"/>
-                            </svg>
-                          )}
+                          {showEditPass ? <EyeOffIcon /> : <EyeIcon />}
                         </button>
                       </div>
                     </Field>
@@ -407,9 +437,11 @@ export default function AdminUsers() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="font-semibold text-sm">{u.name}</div>
-                  <div className="text-xs text-zinc-500">{u.email} · {u.dept}</div>
+                  <div className="text-xs text-zinc-500 truncate">
+                    @{u.username}{u.email ? ` · ${u.email}` : ""} · {u.dept}
+                  </div>
                 </div>
-                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                <span className={`text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${
                   u.role === "admin"
                     ? "bg-indigo-950 text-indigo-400"
                     : "bg-zinc-800 text-zinc-400"
@@ -460,5 +492,24 @@ function Field({ label, children }) {
       <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">{label}</label>
       {children}
     </div>
+  );
+}
+
+function EyeIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function EyeOffIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+      <path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94" />
+      <path d="M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19" />
+      <line x1="1" y1="1" x2="23" y2="23" />
+    </svg>
   );
 }
