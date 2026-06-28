@@ -35,10 +35,24 @@ async function main() {
 
   // ── Step 2: Create superadmin ──────────────────────────────────────────
   console.log("\nSetting up superadmin account...");
-  const existing = await prisma.user.findUnique({ where: { email: "pippingpole@gmail.com" } });
+
+  // Try finding by username first, then fall back to email for legacy records
+  let existing = await prisma.user.findUnique({ where: { username: "superadmin" } });
+  if (!existing) {
+    existing = await prisma.user.findUnique({ where: { email: "pippingpole@gmail.com" } });
+  }
 
   if (existing && existing.role === "superadmin") {
-    console.log("✅ Superadmin already exists");
+    // Patch username if missing (handles existing records before migration)
+    if (!existing.username) {
+      await prisma.user.update({
+        where: { id: existing.id },
+        data: { username: "superadmin" },
+      });
+      console.log("✅ Superadmin username patched → superadmin");
+    } else {
+      console.log("✅ Superadmin already exists (username:", existing.username + ")");
+    }
   } else {
     const password = await prompt("Enter superadmin password: ");
     if (!password || password.length < 6) {
@@ -49,14 +63,20 @@ async function main() {
 
     if (existing) {
       await prisma.user.update({
-        where: { email: "pippingpole@gmail.com" },
-        data: { role: "superadmin", tenantId: null, password: hashed },
+        where: { id: existing.id },
+        data: {
+          role:     "superadmin",
+          tenantId: null,
+          password: hashed,
+          username: "superadmin",
+        },
       });
       console.log("✅ Existing user upgraded to superadmin");
     } else {
       await prisma.user.create({
         data: {
           email:          "pippingpole@gmail.com",
+          username:       "superadmin",
           password:       hashed,
           name:           "Super Admin",
           role:           "superadmin",
@@ -66,15 +86,29 @@ async function main() {
           color:          "#6366f1",
         },
       });
-      console.log("✅ Superadmin created");
+      console.log("✅ Superadmin created  (username: superadmin)");
     }
   }
 
   // ── Step 3: Create default admin for PippingPole ───────────────────────
   console.log("\nSetting up PippingPole admin...");
-  const adminExists = await prisma.user.findUnique({ where: { email: "admin@pippingpole.com" } });
+
+  let adminExists = await prisma.user.findUnique({ where: { username: "pippingpole.admin" } });
+  if (!adminExists) {
+    adminExists = await prisma.user.findUnique({ where: { email: "admin@pippingpole.com" } });
+  }
+
   if (adminExists) {
-    console.log("✅ Admin already exists");
+    // Patch username if missing
+    if (!adminExists.username) {
+      await prisma.user.update({
+        where: { id: adminExists.id },
+        data: { username: "pippingpole.admin" },
+      });
+      console.log("✅ Admin username patched → pippingpole.admin");
+    } else {
+      console.log("✅ Admin already exists (username:", adminExists.username + ")");
+    }
   } else {
     const adminPassword = await prompt("Enter admin password for PippingPole: ");
     if (!adminPassword || adminPassword.length < 6) {
@@ -86,6 +120,7 @@ async function main() {
       data: {
         tenantId:       tenant.id,
         email:          "admin@pippingpole.com",
+        username:       "pippingpole.admin",
         password:       hashed,
         name:           "PippingPole Admin",
         role:           "admin",
@@ -94,13 +129,13 @@ async function main() {
         color:          "#6366f1",
       },
     });
-    console.log("✅ PippingPole admin created");
+    console.log("✅ PippingPole admin created  (username: pippingpole.admin)");
   }
 
   console.log("\n🎉 Seed complete!\n");
   console.log("Login details:");
-  console.log("  Superadmin:  pippingpole@gmail.com  (no company code)");
-  console.log("  Admin:       admin@pippingpole.com  company code: pippingpole\n");
+  console.log("  Superadmin:  username: superadmin          (no company code)");
+  console.log("  Admin:       username: pippingpole.admin   company code: pippingpole\n");
 }
 
 main()

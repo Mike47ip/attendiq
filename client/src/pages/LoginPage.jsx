@@ -46,7 +46,7 @@ function PunchClockIllustration() {
 
 export default function LoginPage() {
   const { login } = useAuth();
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -57,7 +57,7 @@ export default function LoginPage() {
     setError("");
     setLoading(true);
     try {
-      const result = await loginUser({ email, password });
+      const result = await loginUser({ username, password });
       login(result.user, result.token);
     } catch (err) {
       setError(err.message);
@@ -84,7 +84,7 @@ export default function LoginPage() {
       <div className="flex-1 flex items-center justify-center px-4">
         <div className="w-full max-w-sm">
 
-          {/* Logo (mobile + desktop) */}
+          {/* Logo */}
           <div className="flex flex-col items-center mb-8">
             <div className="w-12 h-12 rounded-2xl bg-indigo-600 flex items-center justify-center text-white font-black text-xl mb-4">
               A
@@ -102,15 +102,16 @@ export default function LoginPage() {
             )}
 
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-              {/* Email */}
+              {/* Username */}
               <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Email</label>
+                <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Username</label>
                 <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@company.com"
+                  type="text"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="your.username"
                   required
+                  autoComplete="username"
                   className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white text-sm placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500 transition-colors"
                 />
               </div>
@@ -127,6 +128,7 @@ export default function LoginPage() {
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
                     required
+                    autoComplete="current-password"
                     className="w-full bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white text-sm placeholder:text-zinc-600 focus:outline-none focus:border-indigo-500 transition-colors pr-16"
                   />
                   <button

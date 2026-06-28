@@ -61,3 +61,11 @@ export async function updateUserAsSuperAdmin(userId, data) {
 export async function deleteUserAsSuperAdmin(userId) {
   return request(`/superadmin/users/${userId}`, { method: "DELETE" });
 }
+
+export async function createUserAsSuperAdmin(data) {
+  return request("/superadmin/users", { method: "POST", body: data });
+}
+
+export async function getOfficesForTenant(tenantId) {
+  return request(`/admin/offices?tenantId=${tenantId}`);
+}

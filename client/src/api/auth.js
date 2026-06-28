@@ -24,10 +24,10 @@ async function request(path, options = {}) {
   return data;
 }
 
-export async function loginUser({ email, password }) {
+export async function loginUser({ username, password }) {
   return request("/auth/login", {
     method: "POST",
-    body: { email, password },
+    body: { username, password },
   });
 }
 
