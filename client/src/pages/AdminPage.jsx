@@ -10,12 +10,12 @@ import AdminLeaderboard from "../components/admin/AdminLeaderboard";
 import AdminAnalytics from "../components/admin/AdminAnalytics";
 
 const NAV = [
-  { key: "dashboard",   label: "Dashboard",   icon: "⬡" },
-  { key: "users",       label: "Staff",        icon: "◈" },
-  { key: "offices",     label: "Offices",      icon: "◎" },
-  { key: "attendance",  label: "Attendance",   icon: "◫" },
-  { key: "analytics",   label: "Analytics",    icon: "📊" },
-  { key: "leaderboard", label: "Leaderboard",  icon: "🏆" },
+  { key: "dashboard",   label: "Dashboard",  icon: "⬡" },
+  { key: "users",       label: "Staff",       icon: "◈" },
+  { key: "offices",     label: "Offices",     icon: "◎" },
+  { key: "attendance",  label: "Attendance",  icon: "◫" },
+  { key: "analytics",   label: "Analytics",   icon: "📊" },
+  { key: "leaderboard", label: "Leaderboard", icon: "🏆" },
 ];
 
 export default function AdminPage() {
@@ -23,7 +23,12 @@ export default function AdminPage() {
   const [view, setView] = useState("dashboard");
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white flex flex-col pb-16 sm:pb-0">
+    // Same fix as SuperAdminPage — 100dvh + overflow-x-hidden prevents
+    // Chrome iOS from clipping content when inline forms expand
+    <div
+      className="bg-zinc-950 text-white flex flex-col overflow-x-hidden pb-16 sm:pb-0"
+      style={{ minHeight: "100dvh" }}
+    >
 
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur-md">
@@ -51,7 +56,7 @@ export default function AdminPage() {
         </div>
       </header>
 
-      {/* Desktop top nav — hidden on mobile */}
+      {/* Desktop top nav */}
       <nav className="hidden sm:block border-b border-zinc-800 bg-zinc-950">
         <div className="max-w-6xl mx-auto px-6 flex">
           {NAV.map(({ key, label, icon }) => (
@@ -72,8 +77,8 @@ export default function AdminPage() {
         </div>
       </nav>
 
-      {/* Content */}
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-6 sm:py-8">
+      {/* Content — no flex-1, natural height so Chrome iOS doesn't clip */}
+      <main className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 pb-24">
         {view === "dashboard"   && <AdminDashboard />}
         {view === "users"       && <AdminUsers />}
         {view === "offices"     && <AdminOffices />}
@@ -82,7 +87,7 @@ export default function AdminPage() {
         {view === "leaderboard" && <AdminLeaderboard />}
       </main>
 
-      {/* Mobile bottom nav — hidden on desktop */}
+      {/* Mobile bottom nav */}
       <nav className="sm:hidden fixed bottom-0 left-0 right-0 z-50 bg-zinc-950 border-t border-zinc-800">
         <div className="flex">
           {NAV.map(({ key, label, icon }) => (
