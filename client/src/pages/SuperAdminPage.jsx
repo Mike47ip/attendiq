@@ -16,7 +16,7 @@ const EMPTY_FORM = { name: "", slug: "", adminName: "", adminEmail: "", adminPas
 
 const NAV = [
   { key: "companies", label: "Companies", icon: "◈" },
-  { key: "users",      label: "Users",     icon: "◎" },
+  { key: "users",     label: "Users",     icon: "◎" },
 ];
 
 export default function SuperAdminPage() {
@@ -40,10 +40,7 @@ export default function SuperAdminPage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [t, s] = await Promise.all([
-        getAllTenants(),
-        getPlatformStats(),
-      ]);
+      const [t, s] = await Promise.all([getAllTenants(), getPlatformStats()]);
       setTenants(t.tenants);
       setStats(s);
     } catch (err) {
@@ -94,7 +91,6 @@ export default function SuperAdminPage() {
     }
   };
 
-  // ── Inline tenant edit handlers ──────────────────────────────────────
   function startEdit(tenant) {
     setEditingId(tenant.id);
     setEditForm({ name: tenant.name, slug: tenant.slug });
@@ -121,7 +117,15 @@ export default function SuperAdminPage() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white flex flex-col">
+    // ── Key fix: use min-h-[100dvh] instead of min-h-screen ──────────────
+    // Chrome iOS has a dynamic viewport that differs from 100vh, causing
+    // content to get clipped behind the browser chrome. 100dvh respects
+    // the actual visible viewport height. overflow-x-hidden prevents any
+    // horizontal bleed from expanded forms.
+    <div
+      className="bg-zinc-950 text-white flex flex-col overflow-x-hidden"
+      style={{ minHeight: "100dvh" }}
+    >
 
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur-md">
@@ -135,8 +139,10 @@ export default function SuperAdminPage() {
           </div>
           <div className="flex items-center gap-3">
             <span className="text-sm text-zinc-400 hidden sm:block">{user?.name}</span>
-            <button onClick={logout}
-              className="text-xs text-zinc-500 hover:text-zinc-300 border border-zinc-800 px-3 py-1.5 rounded-lg transition-colors">
+            <button
+              onClick={logout}
+              className="text-xs text-zinc-500 hover:text-zinc-300 border border-zinc-800 px-3 py-1.5 rounded-lg transition-colors"
+            >
               Sign Out
             </button>
           </div>
@@ -164,7 +170,11 @@ export default function SuperAdminPage() {
         </div>
       </nav>
 
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-8 flex flex-col gap-8">
+      {/* ── Key fix: removed flex-1, use width-full + auto height ──────────
+          flex-1 on a flex child inside a fixed-height parent is what causes
+          Chrome iOS to clip content when inner components expand. Letting
+          main size naturally to its content avoids the clipping entirely.   */}
+      <main className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-8 flex flex-col gap-8 pb-24">
 
         {view === "companies" && (
           <>
@@ -172,10 +182,10 @@ export default function SuperAdminPage() {
             {stats && (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 {[
-                  { label: "Total Companies",    value: stats.totalTenants,       color: "#a5b4fc" },
-                  { label: "Active Companies",   value: stats.activeTenants,      color: "#4ade80" },
-                  { label: "Total Staff",        value: stats.totalUsers,         color: "#818cf8" },
-                  { label: "Check-ins Today",    value: stats.totalCheckInsToday, color: "#fb923c" },
+                  { label: "Total Companies",  value: stats.totalTenants,       color: "#a5b4fc" },
+                  { label: "Active Companies", value: stats.activeTenants,      color: "#4ade80" },
+                  { label: "Total Staff",      value: stats.totalUsers,         color: "#818cf8" },
+                  { label: "Check-ins Today",  value: stats.totalCheckInsToday, color: "#fb923c" },
                 ].map(({ label, value, color }) => (
                   <div key={label} className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
                     <div className="text-3xl font-black" style={{ color, fontVariantNumeric: "tabular-nums" }}>{value}</div>
@@ -191,9 +201,11 @@ export default function SuperAdminPage() {
                 <h1 className="text-xl font-black tracking-tight">Companies</h1>
                 <p className="text-zinc-500 text-sm mt-1">{tenants.length} registered</p>
               </div>
-              <button onClick={() => setShowForm(!showForm)}
+              <button
+                onClick={() => setShowForm(!showForm)}
                 className="px-4 py-2 rounded-xl text-sm font-bold text-white transition-all"
-                style={{ background: "linear-gradient(135deg, #4f46e5, #7c3aed)", boxShadow: "0 4px 16px #4f46e533" }}>
+                style={{ background: "linear-gradient(135deg, #4f46e5, #7c3aed)", boxShadow: "0 4px 16px #4f46e533" }}
+              >
                 + New Company
               </button>
             </div>
@@ -211,36 +223,47 @@ export default function SuperAdminPage() {
                 <form onSubmit={handleCreate} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1.5">
                     <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Company Name</label>
-                    <input required placeholder="Acme Corp" value={form.name}
+                    <input
+                      required placeholder="Acme Corp" value={form.name}
                       onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
-                      className="bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-indigo-500" />
+                      className="bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-indigo-500"
+                    />
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Company Slug</label>
-                    <input required placeholder="acme-corp" value={form.slug}
+                    <input
+                      required placeholder="acme-corp" value={form.slug}
                       onChange={e => setForm(p => ({ ...p, slug: e.target.value.toLowerCase().replace(/\s+/g, "-") }))}
-                      className="bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-indigo-500" />
+                      className="bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-indigo-500"
+                    />
                     <p className="text-xs text-zinc-600">Used as company code for login</p>
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Admin Name</label>
-                    <input required placeholder="John Doe" value={form.adminName}
+                    <input
+                      required placeholder="John Doe" value={form.adminName}
                       onChange={e => setForm(p => ({ ...p, adminName: e.target.value }))}
-                      className="bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-indigo-500" />
+                      className="bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-indigo-500"
+                    />
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Admin Email</label>
-                    <input required type="email" placeholder="admin@acme.com" value={form.adminEmail}
+                    <input
+                      required type="email" placeholder="admin@acme.com" value={form.adminEmail}
                       onChange={e => setForm(p => ({ ...p, adminEmail: e.target.value }))}
-                      className="bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-indigo-500" />
+                      className="bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-indigo-500"
+                    />
                   </div>
                   <div className="flex flex-col gap-1.5">
                     <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Admin Password</label>
                     <div className="relative">
-                      <input required type={showAdminPass ? "text" : "password"} placeholder="Temporary password" value={form.adminPassword}
+                      <input
+                        required type={showAdminPass ? "text" : "password"}
+                        placeholder="Temporary password" value={form.adminPassword}
                         onChange={e => setForm(p => ({ ...p, adminPassword: e.target.value }))}
                         className="bg-zinc-800 border border-zinc-700 rounded-xl px-4 py-3 text-white text-sm outline-none focus:border-indigo-500 w-full"
-                        style={{ paddingRight: 44 }} />
+                        style={{ paddingRight: 44 }}
+                      />
                       <button
                         type="button"
                         onClick={() => setShowAdminPass(p => !p)}
@@ -251,13 +274,18 @@ export default function SuperAdminPage() {
                     </div>
                   </div>
                   <div className="sm:col-span-2 flex gap-3">
-                    <button type="submit" disabled={saving}
+                    <button
+                      type="submit" disabled={saving}
                       className="flex-1 py-3 rounded-xl font-bold text-sm text-white disabled:opacity-50"
-                      style={{ background: "linear-gradient(135deg, #4f46e5, #7c3aed)" }}>
+                      style={{ background: "linear-gradient(135deg, #4f46e5, #7c3aed)" }}
+                    >
                       {saving ? "Creating…" : "Create Company"}
                     </button>
-                    <button type="button" onClick={() => { setShowForm(false); setForm(EMPTY_FORM); setShowAdminPass(false); }}
-                      className="px-4 py-3 rounded-xl text-sm font-medium text-zinc-400 border border-zinc-700">
+                    <button
+                      type="button"
+                      onClick={() => { setShowForm(false); setForm(EMPTY_FORM); setShowAdminPass(false); }}
+                      className="px-4 py-3 rounded-xl text-sm font-medium text-zinc-400 border border-zinc-700"
+                    >
                       Cancel
                     </button>
                   </div>
@@ -322,24 +350,30 @@ export default function SuperAdminPage() {
                   }
 
                   return (
-                    <div key={tenant.id}
+                    <div
+                      key={tenant.id}
                       className="bg-zinc-900 border border-zinc-800 rounded-2xl px-5 py-4 flex items-center gap-4"
-                      style={{ opacity: tenant.isActive ? 1 : 0.6 }}>
-
-                      {/* Status indicator */}
-                      <div className="w-3 h-3 rounded-full flex-shrink-0"
-                        style={{ background: tenant.isActive ? "#4ade80" : "#f87171", boxShadow: tenant.isActive ? "0 0 8px #4ade8077" : "none" }} />
+                      style={{ opacity: tenant.isActive ? 1 : 0.6 }}
+                    >
+                      {/* Status dot */}
+                      <div
+                        className="w-3 h-3 rounded-full flex-shrink-0"
+                        style={{
+                          background: tenant.isActive ? "#4ade80" : "#f87171",
+                          boxShadow: tenant.isActive ? "0 0 8px #4ade8077" : "none",
+                        }}
+                      />
 
                       {/* Info */}
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 flex-wrap">
                           <span className="font-bold text-white">{tenant.name}</span>
                           <span className="text-xs text-zinc-600 font-mono">{tenant.slug}</span>
                           {!tenant.isActive && (
                             <span className="text-xs bg-red-950 text-red-400 border border-red-900 px-2 py-0.5 rounded-full">Inactive</span>
                           )}
                         </div>
-                        <div className="flex items-center gap-4 mt-1 text-xs text-zinc-500">
+                        <div className="flex items-center gap-4 mt-1 text-xs text-zinc-500 flex-wrap">
                           <span>👥 {tenant._count.users} staff</span>
                           <span>🏢 {tenant._count.offices} offices</span>
                           <span>📋 {tenant._count.attendance} records</span>
@@ -351,7 +385,8 @@ export default function SuperAdminPage() {
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <button
                           onClick={() => startEdit(tenant)}
-                          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-zinc-500 hover:text-purple-400 border border-transparent hover:border-purple-900/50 transition-all">
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-zinc-500 hover:text-purple-400 border border-transparent hover:border-purple-900/50 transition-all"
+                        >
                           Edit
                         </button>
                         <button
@@ -362,12 +397,14 @@ export default function SuperAdminPage() {
                             background: tenant.isActive ? "rgba(248,113,113,0.1)" : "rgba(74,222,128,0.1)",
                             color: tenant.isActive ? "#f87171" : "#4ade80",
                             border: `1px solid ${tenant.isActive ? "#f8717133" : "#4ade8033"}`,
-                          }}>
+                          }}
+                        >
                           {toggling === tenant.id ? "…" : tenant.isActive ? "Deactivate" : "Activate"}
                         </button>
                         <button
                           onClick={() => handleDelete(tenant.id, tenant.name)}
-                          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-zinc-600 hover:text-red-400 border border-transparent hover:border-red-900/50 transition-all">
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-zinc-600 hover:text-red-400 border border-transparent hover:border-red-900/50 transition-all"
+                        >
                           Delete
                         </button>
                       </div>
