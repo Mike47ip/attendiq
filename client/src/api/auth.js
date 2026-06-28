@@ -17,7 +17,6 @@ async function request(path, options = {}) {
     ...options,
     body: options.body ? JSON.stringify(options.body) : undefined,
   });
-
   const text = await res.text();
   const data = text ? JSON.parse(text) : {};
   if (!res.ok) throw new Error(data.message || `Request failed: ${res.status}`);
@@ -25,10 +24,7 @@ async function request(path, options = {}) {
 }
 
 export async function loginUser({ username, password }) {
-  return request("/auth/login", {
-    method: "POST",
-    body: { username, password },
-  });
+  return request("/auth/login", { method: "POST", body: { username, password } });
 }
 
 export async function createStaffUser(data) {
@@ -63,12 +59,16 @@ export async function deleteOffice(officeId) {
   return request(`/admin/offices/${officeId}`, { method: "DELETE" });
 }
 
-export async function getAttendanceHistory({ startDate, endDate, userId }) {
+export async function getAttendanceHistory({ startDate, endDate, userId, officeId } = {}) {
   const params = new URLSearchParams({ startDate, endDate });
-  if (userId) params.set("userId", userId);
+  if (userId)   params.set("userId",   userId);
+  if (officeId) params.set("officeId", officeId);
   return request(`/admin/attendance?${params}`);
 }
 
-export async function getTodayStats() {
-  return request("/admin/stats/today");
+export async function getTodayStats(officeId = "") {
+  const params = new URLSearchParams();
+  if (officeId) params.set("officeId", officeId);
+  const qs = params.toString();
+  return request(`/admin/stats/today${qs ? `?${qs}` : ""}`);
 }

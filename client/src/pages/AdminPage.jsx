@@ -1,6 +1,6 @@
 // client/src/pages/AdminPage.jsx
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "../hooks/useAuth";
 import AdminDashboard from "../components/admin/AdminDashboard";
 import AdminUsers from "../components/admin/AdminUsers";
@@ -8,6 +8,7 @@ import AdminOffices from "../components/admin/AdminOffices";
 import AdminAttendance from "../components/admin/AdminAttendance";
 import AdminLeaderboard from "../components/admin/AdminLeaderboard";
 import AdminAnalytics from "../components/admin/AdminAnalytics";
+import { getAllOffices } from "../api/auth";
 
 const NAV = [
   { key: "dashboard",   label: "Dashboard",  icon: "⬡" },
@@ -18,13 +19,25 @@ const NAV = [
   { key: "leaderboard", label: "Leaderboard", icon: "🏆" },
 ];
 
+// Tabs that benefit from office filtering
+const FILTERABLE_TABS = ["dashboard", "users", "attendance", "analytics", "leaderboard"];
+
 export default function AdminPage() {
   const { user, logout } = useAuth();
-  const [view, setView] = useState("dashboard");
+  const [view, setView]               = useState("dashboard");
+  const [offices, setOffices]         = useState([]);
+  const [selectedOfficeId, setSelectedOfficeId] = useState("");
+
+  // Fetch offices once at the top level — shared across all tabs
+  useEffect(() => {
+    getAllOffices()
+      .then(res => setOffices(res.offices || []))
+      .catch(err => console.error("Failed to load offices:", err));
+  }, []);
+
+  const showOfficeFilter = FILTERABLE_TABS.includes(view) && offices.length > 1;
 
   return (
-    // Same fix as SuperAdminPage — 100dvh + overflow-x-hidden prevents
-    // Chrome iOS from clipping content when inline forms expand
     <div
       className="bg-zinc-950 text-white flex flex-col overflow-x-hidden pb-16 sm:pb-0"
       style={{ minHeight: "100dvh" }}
@@ -32,8 +45,8 @@ export default function AdminPage() {
 
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur-md">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
-          <div className="flex items-center gap-2">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 flex-shrink-0">
             <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center text-xs font-bold flex-shrink-0">
               A
             </div>
@@ -42,13 +55,27 @@ export default function AdminPage() {
               Admin
             </span>
           </div>
-          <div className="flex items-center gap-3">
+
+          <div className="flex items-center gap-3 flex-1 justify-end">
+            {/* Global office filter — only shown on filterable tabs with multiple offices */}
+            {showOfficeFilter && (
+              <select
+                value={selectedOfficeId}
+                onChange={e => setSelectedOfficeId(e.target.value)}
+                className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-1.5 text-white text-xs font-semibold outline-none focus:border-indigo-500 transition-colors max-w-[160px]"
+              >
+                <option value="">All Offices</option>
+                {offices.map(o => (
+                  <option key={o.id} value={o.id}>{o.name}</option>
+                ))}
+              </select>
+            )}
             <span className="text-sm text-zinc-400 hidden sm:block truncate max-w-[120px]">
               {user?.name}
             </span>
             <button
               onClick={logout}
-              className="text-xs text-zinc-500 hover:text-zinc-300 border border-zinc-800 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap"
+              className="text-xs text-zinc-500 hover:text-zinc-300 border border-zinc-800 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap flex-shrink-0"
             >
               Sign Out
             </button>
@@ -77,14 +104,16 @@ export default function AdminPage() {
         </div>
       </nav>
 
-      {/* Content — no flex-1, natural height so Chrome iOS doesn't clip */}
+      {/* Content */}
       <main className="w-full max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 pb-24">
-        {view === "dashboard"   && <AdminDashboard />}
-        {view === "users"       && <AdminUsers />}
-        {view === "offices"     && <AdminOffices />}
-        {view === "attendance"  && <AdminAttendance />}
-        {view === "analytics"   && <AdminAnalytics />}
-        {view === "leaderboard" && <AdminLeaderboard />}
+        {view === "dashboard"   && <AdminDashboard  officeId={selectedOfficeId} offices={offices} />}
+        {view === "users"       && <AdminUsers       officeId={selectedOfficeId} offices={offices} />}
+        {view === "offices"     && <AdminOffices     offices={offices} refreshOffices={() =>
+          getAllOffices().then(res => setOffices(res.offices || []))
+        } />}
+        {view === "attendance"  && <AdminAttendance  officeId={selectedOfficeId} offices={offices} />}
+        {view === "analytics"   && <AdminAnalytics   officeId={selectedOfficeId} offices={offices} />}
+        {view === "leaderboard" && <AdminLeaderboard officeId={selectedOfficeId} offices={offices} />}
       </main>
 
       {/* Mobile bottom nav */}

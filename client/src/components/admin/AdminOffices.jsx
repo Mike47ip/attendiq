@@ -1,11 +1,10 @@
 // client/src/components/admin/AdminOffices.jsx
+// Receives offices + refreshOffices from AdminPage (no internal fetch needed)
 
-import { useState, useEffect } from "react";
-import { getAllOffices, createOffice, updateOffice, deleteOffice } from "../../api/auth";
+import { useState } from "react";
+import { createOffice, updateOffice, deleteOffice } from "../../api/auth";
 
-export default function AdminOffices() {
-  const [offices, setOffices]   = useState([]);
-  const [loading, setLoading]   = useState(true);
+export default function AdminOffices({ offices = [], refreshOffices }) {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing]   = useState(null);
   const [error, setError]       = useState("");
@@ -13,20 +12,6 @@ export default function AdminOffices() {
 
   const emptyForm = { name: "", lat: "", lng: "", radiusMetres: 150 };
   const [form, setForm] = useState(emptyForm);
-
-  useEffect(() => { fetchOffices(); }, []);
-
-  async function fetchOffices() {
-    setLoading(true);
-    try {
-      const res = await getAllOffices();
-      setOffices(res.offices || []);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }
 
   function startEdit(office) {
     setEditing(office.id);
@@ -57,7 +42,7 @@ export default function AdminOffices() {
         await createOffice(payload);
       }
       cancelForm();
-      fetchOffices();
+      refreshOffices();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -69,7 +54,7 @@ export default function AdminOffices() {
     if (!confirm("Delete this office? Staff assigned to it will lose their office.")) return;
     try {
       await deleteOffice(officeId);
-      setOffices(prev => prev.filter(o => o.id !== officeId));
+      refreshOffices();
     } catch (err) {
       setError(err.message);
     }
@@ -102,61 +87,44 @@ export default function AdminOffices() {
           <form onSubmit={handleSubmit} className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="sm:col-span-2 flex flex-col gap-1.5">
               <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Office Name</label>
-              <input
-                type="text" required placeholder="e.g. Head Office"
+              <input type="text" required placeholder="e.g. Head Office"
                 value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))}
-                className="input-field"
-              />
+                className="input-field" />
             </div>
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Latitude</label>
-              <input
-                type="number" required step="any" placeholder="e.g. 6.796750"
+              <input type="number" required step="any" placeholder="e.g. 6.796750"
                 value={form.lat} onChange={e => setForm(p => ({ ...p, lat: e.target.value }))}
-                className="input-field"
-              />
+                className="input-field" />
             </div>
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Longitude</label>
-              <input
-                type="number" required step="any" placeholder="e.g. -1.579770"
+              <input type="number" required step="any" placeholder="e.g. -1.579770"
                 value={form.lng} onChange={e => setForm(p => ({ ...p, lng: e.target.value }))}
-                className="input-field"
-              />
+                className="input-field" />
             </div>
             <div className="sm:col-span-2 flex flex-col gap-1.5">
               <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">
                 Allowed Radius — {form.radiusMetres}m
               </label>
-              <input
-                type="range" min="50" max="500" step="10"
-                value={form.radiusMetres}
-                onChange={e => setForm(p => ({ ...p, radiusMetres: e.target.value }))}
-                className="w-full accent-indigo-500"
-              />
+              <input type="range" min="50" max="500" step="10"
+                value={form.radiusMetres} onChange={e => setForm(p => ({ ...p, radiusMetres: e.target.value }))}
+                className="w-full accent-indigo-500" />
               <div className="flex justify-between text-xs text-zinc-600">
-                <span>50m (tight)</span>
-                <span>500m (large campus)</span>
+                <span>50m (tight)</span><span>500m (large campus)</span>
               </div>
             </div>
-
-            {/* How to get coordinates tip */}
             <div className="sm:col-span-2 bg-indigo-950/30 border border-indigo-900/30 rounded-xl px-4 py-3 text-xs text-indigo-400">
-              💡 To get coordinates: open Google Maps → right-click your office building → click the coordinates that appear at the top of the menu.
+              💡 To get coordinates: open Google Maps → right-click your office building → click the coordinates at the top of the menu.
             </div>
-
             <div className="sm:col-span-2 flex gap-2">
-              <button
-                type="submit" disabled={saving}
+              <button type="submit" disabled={saving}
                 className="flex-1 py-3 rounded-xl font-bold text-sm text-white disabled:opacity-50"
-                style={{ background: "linear-gradient(135deg, #4f46e5, #7c3aed)" }}
-              >
+                style={{ background: "linear-gradient(135deg, #4f46e5, #7c3aed)" }}>
                 {saving ? "Saving…" : editing ? "Update Office" : "Create Office"}
               </button>
-              <button
-                type="button" onClick={cancelForm}
-                className="px-4 py-3 rounded-xl text-sm font-medium text-zinc-400 border border-zinc-700"
-              >
+              <button type="button" onClick={cancelForm}
+                className="px-4 py-3 rounded-xl text-sm font-medium text-zinc-400 border border-zinc-700">
                 Cancel
               </button>
             </div>
@@ -165,11 +133,7 @@ export default function AdminOffices() {
       )}
 
       {/* List */}
-      {loading ? (
-        <div className="flex flex-col gap-2 animate-pulse">
-          {[1,2].map(i => <div key={i} className="h-24 bg-zinc-800 rounded-xl" />)}
-        </div>
-      ) : offices.length === 0 ? (
+      {offices.length === 0 ? (
         <div className="text-center py-16 text-zinc-600 text-sm border border-dashed border-zinc-800 rounded-2xl">
           No offices yet. Add your first one.
         </div>
@@ -188,16 +152,12 @@ export default function AdminOffices() {
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <button
-                    onClick={() => startEdit(o)}
-                    className="text-xs text-zinc-400 hover:text-white border border-zinc-700 px-3 py-1.5 rounded-lg transition-colors"
-                  >
+                  <button onClick={() => startEdit(o)}
+                    className="text-xs text-zinc-400 hover:text-white border border-zinc-700 px-3 py-1.5 rounded-lg transition-colors">
                     Edit
                   </button>
-                  <button
-                    onClick={() => handleDelete(o.id)}
-                    className="text-xs text-zinc-600 hover:text-red-400 border border-transparent hover:border-red-900/50 px-3 py-1.5 rounded-lg transition-colors"
-                  >
+                  <button onClick={() => handleDelete(o.id)}
+                    className="text-xs text-zinc-600 hover:text-red-400 border border-transparent hover:border-red-900/50 px-3 py-1.5 rounded-lg transition-colors">
                     Delete
                   </button>
                 </div>
@@ -208,12 +168,8 @@ export default function AdminOffices() {
       )}
 
       <style>{`
-        .input-field {
-          width: 100%; background: #27272a; border: 1px solid #3f3f46;
-          border-radius: 10px; padding: 10px 14px; color: white;
-          font-size: 13px; outline: none; transition: border-color 0.15s;
-        }
-        .input-field:focus { border-color: #6366f1; }
+        .input-field { width:100%; background:#27272a; border:1px solid #3f3f46; border-radius:10px; padding:10px 14px; color:white; font-size:13px; outline:none; transition:border-color 0.15s; }
+        .input-field:focus { border-color:#6366f1; }
       `}</style>
     </div>
   );

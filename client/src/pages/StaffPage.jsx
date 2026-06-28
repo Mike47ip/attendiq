@@ -34,7 +34,12 @@ export default function StaffPage() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-white flex flex-col pb-16">
+    // Fix 1: min-h-screen → 100dvh so Chrome iOS doesn't clip behind browser chrome
+    // Fix 2: removed flex-1 from main so content grows naturally instead of clipping
+    <div
+      className="bg-zinc-950 text-white flex flex-col overflow-x-hidden pb-16"
+      style={{ minHeight: "100dvh" }}
+    >
 
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur-md">
@@ -59,8 +64,8 @@ export default function StaffPage() {
         </div>
       </header>
 
-      {/* Content */}
-      <main className="flex-1 max-w-lg w-full mx-auto px-4 py-8">
+      {/* Content — natural height, no flex-1 */}
+      <main className="w-full max-w-lg mx-auto px-4 py-8 pb-24">
         {view === "clockin" && <ClockIn user={user} office={office} />}
         {view === "history" && <StaffHistory userId={user?.id} />}
       </main>
