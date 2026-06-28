@@ -15,7 +15,7 @@ const DEPTS  = ["Tech","Creative","Finance","HR","Operations","Marketing","Sales
 const ROLES  = ["staff", "admin", "manager", "supervisor", "superadmin"];
 
 const EMPTY_CREATE_FORM = {
-  name: "", email: "", password: "",
+  name: "", username: "", email: "", password: "",
   role: "staff", dept: "Tech",
   tenantId: "", officeId: "", color: COLORS[0],
 };
@@ -98,6 +98,7 @@ export default function SuperAdminUsers() {
         ...createForm,
         tenantId: createForm.tenantId || null,
         officeId: createForm.officeId || null,
+        email: createForm.email || null,
         avatarInitials: getInitials(createForm.name),
       };
       const { user } = await createUserAsSuperAdmin(payload);
@@ -132,15 +133,15 @@ export default function SuperAdminUsers() {
     setShowEditPass(false);
     setEditForm({
       name: u.name,
-      email: u.email,
+      username: u.username,
+      email: u.email || "",
       role: u.role,
       dept: u.dept,
       officeId: u.officeId || "",
       color: u.color,
-      password: "", // blank = leave unchanged
+      password: "",
     });
 
-    // Load offices for this user's existing tenant so the office dropdown is usable
     setEditOffices([]);
     if (u.tenantId) {
       setLoadingEditOffices(true);
@@ -167,6 +168,7 @@ export default function SuperAdminUsers() {
     try {
       const payload = {
         ...editForm,
+        email: editForm.email || null,
         avatarInitials: getInitials(editForm.name),
       };
       if (!payload.password) delete payload.password;
@@ -219,14 +221,25 @@ export default function SuperAdminUsers() {
                 className="input-field"
               />
             </Field>
-            <Field label="Email">
+
+            <Field label="Username">
               <input
-                type="email" required placeholder="amara@company.com"
+                type="text" required placeholder="e.g. amara.osei"
+                value={createForm.username}
+                onChange={e => setCreateForm(p => ({ ...p, username: e.target.value.toLowerCase().replace(/\s+/g, "") }))}
+                className="input-field"
+              />
+            </Field>
+
+            <Field label="Email (optional)">
+              <input
+                type="email" placeholder="amara@company.com"
                 value={createForm.email}
                 onChange={e => setCreateForm(p => ({ ...p, email: e.target.value }))}
                 className="input-field"
               />
             </Field>
+
             <Field label="Password">
               <div className="relative">
                 <input
@@ -244,6 +257,7 @@ export default function SuperAdminUsers() {
                 </button>
               </div>
             </Field>
+
             <Field label="Role">
               <select
                 value={createForm.role}
@@ -255,6 +269,7 @@ export default function SuperAdminUsers() {
                 ))}
               </select>
             </Field>
+
             <Field label="Department">
               <select
                 value={createForm.dept}
@@ -265,7 +280,6 @@ export default function SuperAdminUsers() {
               </select>
             </Field>
 
-            {/* Tenant dropdown */}
             <Field label="Company">
               <select
                 value={createForm.tenantId}
@@ -277,7 +291,6 @@ export default function SuperAdminUsers() {
               </select>
             </Field>
 
-            {/* Office dropdown — scoped to selected tenant */}
             <Field label="Office">
               <select
                 value={createForm.officeId}
@@ -326,7 +339,7 @@ export default function SuperAdminUsers() {
               <div className="min-w-0">
                 <div className="font-semibold text-sm truncate">{createForm.name || "User Name"}</div>
                 <div className="text-xs text-zinc-500 truncate">
-                  {createForm.role} · {createForm.dept} ·{" "}
+                  {createForm.username ? `@${createForm.username}` : "@username"} · {createForm.role} · {createForm.dept} ·{" "}
                   {createForm.tenantId
                     ? tenants.find(t => t.id === createForm.tenantId)?.name || "Selected company"
                     : "No company"}
@@ -394,13 +407,24 @@ export default function SuperAdminUsers() {
                         className="input-field"
                       />
                     </Field>
-                    <Field label="Email">
+
+                    <Field label="Username">
+                      <input
+                        type="text" value={editForm.username}
+                        onChange={e => setEditForm(p => ({ ...p, username: e.target.value.toLowerCase().replace(/\s+/g, "") }))}
+                        className="input-field"
+                      />
+                    </Field>
+
+                    <Field label="Email (optional)">
                       <input
                         type="email" value={editForm.email}
+                        placeholder="Leave blank if not needed"
                         onChange={e => setEditForm(p => ({ ...p, email: e.target.value }))}
                         className="input-field"
                       />
                     </Field>
+
                     <Field label="Department">
                       <select
                         value={editForm.dept}
@@ -410,6 +434,7 @@ export default function SuperAdminUsers() {
                         {DEPTS.map(d => <option key={d}>{d}</option>)}
                       </select>
                     </Field>
+
                     <Field label="Role">
                       <select
                         value={editForm.role}
@@ -422,7 +447,6 @@ export default function SuperAdminUsers() {
                       </select>
                     </Field>
 
-                    {/* Office dropdown — scoped to the user's existing tenant */}
                     <Field label="Office">
                       <select
                         value={editForm.officeId}
@@ -502,7 +526,7 @@ export default function SuperAdminUsers() {
 
             return (
               <div key={u.id} className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3">
-                {/* Avatar + name/tenant/email */}
+                {/* Avatar + name/tenant/username */}
                 <div className="flex items-center gap-3 flex-1 min-w-0">
                   <div
                     className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
@@ -523,11 +547,13 @@ export default function SuperAdminUsers() {
                         </span>
                       )}
                     </div>
-                    <div className="text-xs text-zinc-500 truncate">{u.email} · {u.dept}</div>
+                    <div className="text-xs text-zinc-500 truncate">
+                      @{u.username}{u.email ? ` · ${u.email}` : ""} · {u.dept}
+                    </div>
                   </div>
                 </div>
 
-                {/* Role badge + actions — own row on mobile, indented to align under name */}
+                {/* Role badge + actions */}
                 <div className="flex items-center gap-2 flex-shrink-0 pl-[52px] sm:pl-0">
                   <span className={`text-xs font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${
                     u.role === "superadmin"

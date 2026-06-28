@@ -80,7 +80,6 @@ function requireSuperAdmin(req, res, next) {
   });
 }
 
-// Get tenantId from token — superadmin can pass ?tenantId= to scope queries
 function getTenantId(req) {
   if (req.user.role === "superadmin") {
     return req.query.tenantId || req.body.tenantId || null;
@@ -111,26 +110,32 @@ function getAttendanceStatus(clockInTime) {
 
 app.post("/api/auth/login", async (req, res) => {
   try {
-    const { email, password, tenantSlug } = req.body;
-    if (!email || !password) return res.status(400).json({ message: "Email and password required" });
+    const { username, password, tenantSlug } = req.body;
+    if (!username || !password)
+      return res.status(400).json({ message: "Username and password required" });
 
     const user = await prisma.user.findUnique({
-      where: { email: email.toLowerCase() },
+      where: { username: username.toLowerCase() },
       include: { office: true, tenant: true },
     });
 
-    if (!user || !user.password) return res.status(401).json({ message: "Invalid email or password" });
+    if (!user || !user.password)
+      return res.status(401).json({ message: "Invalid username or password" });
 
     // Superadmin — no tenant check
     if (user.role === "superadmin") {
       const valid = await bcrypt.compare(password, user.password);
-      if (!valid) return res.status(401).json({ message: "Invalid email or password" });
-      const token = jwt.sign({ userId: user.id, role: user.role, tenantId: null }, JWT_SECRET, { expiresIn: "8h" });
+      if (!valid) return res.status(401).json({ message: "Invalid username or password" });
+      const token = jwt.sign(
+        { userId: user.id, role: user.role, tenantId: null },
+        JWT_SECRET,
+        { expiresIn: "8h" }
+      );
       return res.json({
         token,
         user: {
           id: user.id, name: user.name, email: user.email,
-          role: user.role, tenantId: null,
+          username: user.username, role: user.role, tenantId: null,
           avatarInitials: user.avatarInitials, color: user.color,
         },
       });
@@ -140,8 +145,10 @@ app.post("/api/auth/login", async (req, res) => {
     if (tenantSlug) {
       const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug } });
       if (!tenant) return res.status(404).json({ message: "Company not found" });
-      if (!tenant.isActive) return res.status(403).json({ message: "This company account is inactive. Please contact support." });
-      if (user.tenantId !== tenant.id) return res.status(401).json({ message: "Invalid email or password" });
+      if (!tenant.isActive)
+        return res.status(403).json({ message: "This company account is inactive. Please contact support." });
+      if (user.tenantId !== tenant.id)
+        return res.status(401).json({ message: "Invalid username or password" });
     }
 
     // Check tenant is active
@@ -150,7 +157,7 @@ app.post("/api/auth/login", async (req, res) => {
     }
 
     const valid = await bcrypt.compare(password, user.password);
-    if (!valid) return res.status(401).json({ message: "Invalid email or password" });
+    if (!valid) return res.status(401).json({ message: "Invalid username or password" });
 
     const token = jwt.sign(
       { userId: user.id, role: user.role, tenantId: user.tenantId },
@@ -162,12 +169,10 @@ app.post("/api/auth/login", async (req, res) => {
       token,
       user: {
         id: user.id, name: user.name, email: user.email,
-        role: user.role, dept: user.dept,
+        username: user.username, role: user.role, dept: user.dept,
         avatarInitials: user.avatarInitials, color: user.color,
-        officeId: user.officeId,
-        tenantId: user.tenantId,
-        tenantName: user.tenant?.name,
-        faceRegistered: user.faceRegistered,
+        officeId: user.officeId, tenantId: user.tenantId,
+        tenantName: user.tenant?.name, faceRegistered: user.faceRegistered,
         office: user.office ? {
           id: user.office.id, name: user.office.name,
           lat: user.office.lat, lng: user.office.lng,
@@ -185,7 +190,6 @@ app.post("/api/auth/login", async (req, res) => {
 // SUPERADMIN — TENANT MANAGEMENT
 // ══════════════════════════════════════════════════════════════════════════
 
-// Get all tenants
 app.get("/api/superadmin/tenants", requireSuperAdmin, async (req, res) => {
   try {
     const tenants = await prisma.tenant.findMany({
@@ -198,7 +202,6 @@ app.get("/api/superadmin/tenants", requireSuperAdmin, async (req, res) => {
   } catch (err) { res.status(500).json({ message: "Failed to fetch tenants" }); }
 });
 
-// Create new tenant
 app.post("/api/superadmin/tenants", requireSuperAdmin, async (req, res) => {
   try {
     const { name, slug, adminName, adminEmail, adminPassword } = req.body;
@@ -206,17 +209,21 @@ app.post("/api/superadmin/tenants", requireSuperAdmin, async (req, res) => {
       return res.status(400).json({ message: "All fields required" });
     }
 
-    // Check slug is unique
     const existing = await prisma.tenant.findUnique({ where: { slug } });
     if (existing) return res.status(409).json({ message: "Company slug already exists" });
 
-    // Check email is unique
-    const existingUser = await prisma.user.findUnique({ where: { email: adminEmail.toLowerCase() } });
-    if (existingUser) return res.status(409).json({ message: "Email already exists" });
+    // Derive a default username from the admin email (part before @)
+    const defaultUsername = adminEmail.toLowerCase().split("@")[0];
+    const existingUsername = await prisma.user.findUnique({ where: { username: defaultUsername } });
+    if (existingUsername) {
+      return res.status(409).json({ message: `Username "${defaultUsername}" is already taken. Please use a different admin email.` });
+    }
+
+    const existingEmail = await prisma.user.findUnique({ where: { email: adminEmail.toLowerCase() } });
+    if (existingEmail) return res.status(409).json({ message: "Email already exists" });
 
     const hashed = await bcrypt.hash(adminPassword, 10);
 
-    // Create tenant + admin in transaction
     const tenant = await prisma.$transaction(async (tx) => {
       const t = await tx.tenant.create({
         data: { name, slug: slug.toLowerCase().replace(/\s+/g, "-"), isActive: true },
@@ -225,6 +232,7 @@ app.post("/api/superadmin/tenants", requireSuperAdmin, async (req, res) => {
         data: {
           tenantId: t.id,
           name: adminName,
+          username: defaultUsername,
           email: adminEmail.toLowerCase(),
           password: hashed,
           role: "admin",
@@ -243,7 +251,6 @@ app.post("/api/superadmin/tenants", requireSuperAdmin, async (req, res) => {
   }
 });
 
-// Toggle tenant active status
 app.patch("/api/superadmin/tenants/:id/toggle", requireSuperAdmin, async (req, res) => {
   try {
     const tenant = await prisma.tenant.findUnique({ where: { id: req.params.id } });
@@ -256,7 +263,6 @@ app.patch("/api/superadmin/tenants/:id/toggle", requireSuperAdmin, async (req, r
   } catch (err) { res.status(500).json({ message: "Failed to update tenant" }); }
 });
 
-// Delete tenant
 app.delete("/api/superadmin/tenants/:id", requireSuperAdmin, async (req, res) => {
   try {
     await prisma.tenant.delete({ where: { id: req.params.id } });
@@ -264,7 +270,6 @@ app.delete("/api/superadmin/tenants/:id", requireSuperAdmin, async (req, res) =>
   } catch (err) { res.status(500).json({ message: "Failed to delete tenant" }); }
 });
 
-// Platform-wide stats
 app.get("/api/superadmin/stats", requireSuperAdmin, async (req, res) => {
   try {
     const today = new Date().toISOString().split("T")[0];
@@ -278,14 +283,16 @@ app.get("/api/superadmin/stats", requireSuperAdmin, async (req, res) => {
   } catch (err) { res.status(500).json({ message: "Failed to fetch stats" }); }
 });
 
+// ══════════════════════════════════════════════════════════════════════════
+// SUPERADMIN — CROSS-TENANT USERS
+// ══════════════════════════════════════════════════════════════════════════
 
-// Get all users across all tenants (with tenant info)
 app.get("/api/superadmin/users", requireSuperAdmin, async (req, res) => {
   try {
     const users = await prisma.user.findMany({
       orderBy: { createdAt: "desc" },
       select: {
-        id: true, name: true, email: true, role: true, dept: true,
+        id: true, name: true, username: true, email: true, role: true, dept: true,
         color: true, avatarInitials: true, officeId: true,
         office: { select: { name: true } },
         faceRegistered: true, tenantId: true, createdAt: true,
@@ -296,63 +303,21 @@ app.get("/api/superadmin/users", requireSuperAdmin, async (req, res) => {
   } catch (err) { res.status(500).json({ message: "Failed to fetch users" }); }
 });
 
-// Update any user across any tenant
-app.put("/api/superadmin/users/:id", requireSuperAdmin, async (req, res) => {
-  try {
-    const { name, email, role, dept, officeId, color, avatarInitials, password } = req.body;
-    if (!name || !email) return res.status(400).json({ message: "Name and email required" });
-
-    const existing = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
-    if (existing && existing.id !== req.params.id) {
-      return res.status(409).json({ message: "Email already in use by another user" });
-    }
-
-    const data = {
-      name, email: email.toLowerCase(), role, dept,
-      officeId: officeId || null, color,
-      avatarInitials: avatarInitials || name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2),
-    };
-    if (password) data.password = await bcrypt.hash(password, 10);
-
-    const user = await prisma.user.update({
-      where: { id: req.params.id },
-      data,
-      select: {
-        id: true, name: true, email: true, role: true, dept: true,
-        color: true, avatarInitials: true, officeId: true,
-        office: { select: { name: true } }, faceRegistered: true,
-        tenantId: true, createdAt: true,
-        tenant: { select: { name: true, slug: true } },
-      },
-    });
-    res.json({ user });
-  } catch (err) {
-    console.error("Superadmin update user error:", err);
-    res.status(500).json({ message: "Failed to update user" });
-  }
-});
-
-// Delete any user across any tenant
-app.delete("/api/superadmin/users/:id", requireSuperAdmin, async (req, res) => {
-  try {
-    await prisma.user.delete({ where: { id: req.params.id } });
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ message: "Failed to delete user" }); }
-
-});
-
-// Create a new user as superadmin, assignable to any tenant (or none)
 app.post("/api/superadmin/users", requireSuperAdmin, async (req, res) => {
   try {
-    const { name, email, password, role, dept, tenantId, officeId, color, avatarInitials } = req.body;
-    if (!name || !email || !password) {
-      return res.status(400).json({ message: "Name, email and password required" });
+    const { name, username, email, password, role, dept, tenantId, officeId, color, avatarInitials } = req.body;
+    if (!name || !username || !password) {
+      return res.status(400).json({ message: "Name, username and password required" });
     }
 
-    const existing = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
-    if (existing) return res.status(409).json({ message: "Email already exists" });
+    const existingUsername = await prisma.user.findUnique({ where: { username: username.toLowerCase() } });
+    if (existingUsername) return res.status(409).json({ message: "Username already taken" });
 
-    // If an office is provided, confirm it actually belongs to the selected tenant
+    if (email) {
+      const existingEmail = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+      if (existingEmail) return res.status(409).json({ message: "Email already exists" });
+    }
+
     if (officeId) {
       if (!tenantId) return res.status(400).json({ message: "Cannot assign an office without a tenant" });
       const office = await prisma.office.findUnique({ where: { id: officeId } });
@@ -366,7 +331,8 @@ app.post("/api/superadmin/users", requireSuperAdmin, async (req, res) => {
       data: {
         tenantId: tenantId || null,
         name,
-        email: email.toLowerCase(),
+        username: username.toLowerCase(),
+        email: email ? email.toLowerCase() : null,
         password: hashed,
         role: role || "staff",
         dept: dept || "General",
@@ -375,7 +341,7 @@ app.post("/api/superadmin/users", requireSuperAdmin, async (req, res) => {
         avatarInitials: avatarInitials || name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2),
       },
       select: {
-        id: true, name: true, email: true, role: true, dept: true,
+        id: true, name: true, username: true, email: true, role: true, dept: true,
         color: true, avatarInitials: true, officeId: true,
         office: { select: { name: true } }, faceRegistered: true,
         tenantId: true, createdAt: true,
@@ -388,6 +354,60 @@ app.post("/api/superadmin/users", requireSuperAdmin, async (req, res) => {
     res.status(500).json({ message: "Failed to create user" });
   }
 });
+
+app.put("/api/superadmin/users/:id", requireSuperAdmin, async (req, res) => {
+  try {
+    const { name, username, email, role, dept, officeId, color, avatarInitials, password } = req.body;
+    if (!name || !username) return res.status(400).json({ message: "Name and username required" });
+
+    const existingUsername = await prisma.user.findUnique({ where: { username: username.toLowerCase() } });
+    if (existingUsername && existingUsername.id !== req.params.id) {
+      return res.status(409).json({ message: "Username already taken by another user" });
+    }
+
+    if (email) {
+      const existingEmail = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+      if (existingEmail && existingEmail.id !== req.params.id) {
+        return res.status(409).json({ message: "Email already in use by another user" });
+      }
+    }
+
+    const data = {
+      name,
+      username: username.toLowerCase(),
+      email: email ? email.toLowerCase() : null,
+      role, dept,
+      officeId: officeId || null,
+      color,
+      avatarInitials: avatarInitials || name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2),
+    };
+    if (password) data.password = await bcrypt.hash(password, 10);
+
+    const user = await prisma.user.update({
+      where: { id: req.params.id },
+      data,
+      select: {
+        id: true, name: true, username: true, email: true, role: true, dept: true,
+        color: true, avatarInitials: true, officeId: true,
+        office: { select: { name: true } }, faceRegistered: true,
+        tenantId: true, createdAt: true,
+        tenant: { select: { name: true, slug: true } },
+      },
+    });
+    res.json({ user });
+  } catch (err) {
+    console.error("Superadmin update user error:", err);
+    res.status(500).json({ message: "Failed to update user" });
+  }
+});
+
+app.delete("/api/superadmin/users/:id", requireSuperAdmin, async (req, res) => {
+  try {
+    await prisma.user.delete({ where: { id: req.params.id } });
+    res.json({ success: true });
+  } catch (err) { res.status(500).json({ message: "Failed to delete user" }); }
+});
+
 // ══════════════════════════════════════════════════════════════════════════
 // FACE RECOGNITION
 // ══════════════════════════════════════════════════════════════════════════
@@ -477,7 +497,7 @@ app.get("/api/admin/users", requireAdmin, async (req, res) => {
       where,
       orderBy: { createdAt: "desc" },
       select: {
-        id: true, name: true, email: true, role: true,
+        id: true, name: true, username: true, email: true, role: true,
         dept: true, color: true, avatarInitials: true,
         officeId: true, office: { select: { name: true } },
         faceRegistered: true, tenantId: true, createdAt: true,
@@ -492,33 +512,43 @@ app.post("/api/admin/users", requireAdmin, async (req, res) => {
     const tenantId = getTenantId(req);
     if (!tenantId) return res.status(400).json({ message: "tenantId required" });
 
-    const { name, email, password, role, dept, officeId, color, avatarInitials } = req.body;
-    if (!name || !email || !password) return res.status(400).json({ message: "Name, email and password required" });
+    const { name, username, email, password, role, dept, officeId, color, avatarInitials } = req.body;
+    if (!name || !username || !password)
+      return res.status(400).json({ message: "Name, username and password required" });
 
-    const existing = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
-    if (existing) return res.status(409).json({ message: "Email already exists" });
+    const existingUsername = await prisma.user.findUnique({ where: { username: username.toLowerCase() } });
+    if (existingUsername) return res.status(409).json({ message: "Username already taken" });
+
+    if (email) {
+      const existingEmail = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+      if (existingEmail) return res.status(409).json({ message: "Email already exists" });
+    }
 
     const hashed = await bcrypt.hash(password, 10);
     const user = await prisma.user.create({
       data: {
-        tenantId, name, email: email.toLowerCase(), password: hashed,
-        role: role || "staff", dept: dept || "General",
-        officeId: officeId || null, color: color || "#6366f1",
+        tenantId, name,
+        username: username.toLowerCase(),
+        email: email ? email.toLowerCase() : null,
+        password: hashed,
+        role: role || "staff",
+        dept: dept || "General",
+        officeId: officeId || null,
+        color: color || "#6366f1",
         avatarInitials: avatarInitials || name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2),
       },
     });
-    res.status(201).json({ user: { id: user.id, name: user.name, email: user.email } });
+    res.status(201).json({ user: { id: user.id, name: user.name, username: user.username, email: user.email } });
   } catch (err) {
     console.error("Create user error:", err);
     res.status(500).json({ message: "Failed to create user" });
   }
 });
 
-
 app.put("/api/admin/users/:id", requireAdmin, async (req, res) => {
   try {
-    const { name, email, role, dept, officeId, color, avatarInitials, password } = req.body;
-    if (!name || !email) return res.status(400).json({ message: "Name and email required" });
+    const { name, username, email, role, dept, officeId, color, avatarInitials, password } = req.body;
+    if (!name || !username) return res.status(400).json({ message: "Name and username required" });
 
     const target = await prisma.user.findUnique({ where: { id: req.params.id } });
     if (!target) return res.status(404).json({ message: "User not found" });
@@ -527,16 +557,23 @@ app.put("/api/admin/users/:id", requireAdmin, async (req, res) => {
       return res.status(403).json({ message: "Cannot edit a user outside your company" });
     }
 
-    const existing = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
-    if (existing && existing.id !== req.params.id) {
-      return res.status(409).json({ message: "Email already in use by another user" });
+    const existingUsername = await prisma.user.findUnique({ where: { username: username.toLowerCase() } });
+    if (existingUsername && existingUsername.id !== req.params.id) {
+      return res.status(409).json({ message: "Username already taken by another user" });
+    }
+
+    if (email) {
+      const existingEmail = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+      if (existingEmail && existingEmail.id !== req.params.id) {
+        return res.status(409).json({ message: "Email already in use by another user" });
+      }
     }
 
     const data = {
       name,
-      email: email.toLowerCase(),
-      role,
-      dept,
+      username: username.toLowerCase(),
+      email: email ? email.toLowerCase() : null,
+      role, dept,
       officeId: officeId || null,
       color,
       avatarInitials: avatarInitials || name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2),
@@ -547,7 +584,7 @@ app.put("/api/admin/users/:id", requireAdmin, async (req, res) => {
       where: { id: req.params.id },
       data,
       select: {
-        id: true, name: true, email: true, role: true,
+        id: true, name: true, username: true, email: true, role: true,
         dept: true, color: true, avatarInitials: true,
         officeId: true, office: { select: { name: true } },
         faceRegistered: true, tenantId: true, createdAt: true,
