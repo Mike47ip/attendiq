@@ -19,16 +19,14 @@ const NAV = [
   { key: "leaderboard", label: "Leaderboard", icon: "🏆" },
 ];
 
-// Tabs that benefit from office filtering
 const FILTERABLE_TABS = ["dashboard", "users", "attendance", "analytics", "leaderboard"];
 
 export default function AdminPage() {
   const { user, logout } = useAuth();
-  const [view, setView]               = useState("dashboard");
-  const [offices, setOffices]         = useState([]);
+  const [view, setView]                         = useState("dashboard");
+  const [offices, setOffices]                   = useState([]);
   const [selectedOfficeId, setSelectedOfficeId] = useState("");
 
-  // Fetch offices once at the top level — shared across all tabs
   useEffect(() => {
     getAllOffices()
       .then(res => setOffices(res.offices || []))
@@ -43,43 +41,50 @@ export default function AdminPage() {
       style={{ minHeight: "100dvh" }}
     >
 
-      {/* Header */}
+      {/* ── Header ── */}
       <header className="sticky top-0 z-50 border-b border-zinc-800 bg-zinc-950/90 backdrop-blur-md">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2 flex-shrink-0">
-            <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center text-xs font-bold flex-shrink-0">
-              A
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+
+          {/* Row 1 — logo + sign out (always visible) */}
+          <div className="h-14 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="w-7 h-7 rounded-lg bg-indigo-600 flex items-center justify-center text-xs font-bold shrink-0">
+                A
+              </div>
+              <span className="font-bold text-base tracking-tight">AttendIQ</span>
+              <span className="text-xs bg-indigo-950 text-indigo-400 border border-indigo-800 px-2 py-0.5 rounded-full">
+                Admin
+              </span>
             </div>
-            <span className="font-bold text-base tracking-tight">AttendIQ</span>
-            <span className="text-xs bg-indigo-950 text-indigo-400 border border-indigo-800 px-2 py-0.5 rounded-full ml-1">
-              Admin
-            </span>
+
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-zinc-400 hidden sm:block truncate max-w-[100px]">
+                {user?.name}
+              </span>
+              <button
+                onClick={logout}
+                className="text-xs text-zinc-500 hover:text-zinc-300 border border-zinc-800 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap shrink-0"
+              >
+                Sign Out
+              </button>
+            </div>
           </div>
 
-          <div className="flex items-center gap-3 flex-1 justify-end">
-            {/* Global office filter — only shown on filterable tabs with multiple offices */}
-            {showOfficeFilter && (
+          {/* Row 2 — office filter pill (only when needed, sits below logo row on its own line) */}
+          {showOfficeFilter && (
+            <div className="pb-2">
               <select
                 value={selectedOfficeId}
                 onChange={e => setSelectedOfficeId(e.target.value)}
-                className="bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-1.5 text-white text-xs font-semibold outline-none focus:border-indigo-500 transition-colors max-w-[160px]"
+                className="w-full sm:w-auto bg-zinc-800 border border-zinc-700 rounded-xl px-3 py-1.5 text-white text-xs font-semibold outline-none focus:border-indigo-500 transition-colors"
               >
                 <option value="">All Offices</option>
                 {offices.map(o => (
                   <option key={o.id} value={o.id}>{o.name}</option>
                 ))}
               </select>
-            )}
-            <span className="text-sm text-zinc-400 hidden sm:block truncate max-w-[120px]">
-              {user?.name}
-            </span>
-            <button
-              onClick={logout}
-              className="text-xs text-zinc-500 hover:text-zinc-300 border border-zinc-800 px-3 py-1.5 rounded-lg transition-colors whitespace-nowrap flex-shrink-0"
-            >
-              Sign Out
-            </button>
-          </div>
+            </div>
+          )}
         </div>
       </header>
 
