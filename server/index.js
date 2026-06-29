@@ -16,13 +16,20 @@ import {
   SearchFacesByImageCommand,
   DeleteFacesCommand,
 } from "@aws-sdk/client-rekognition";
+import {
+  requireAuth,
+  requireAdmin,
+  requireSuperAdmin,
+  getTenantId,
+  requireSameTenant,
+} from "./middleware.js";
 
 const app = express();
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
-const ORIGIN      = process.env.ORIGIN   || "https://localhost:5173";
-const JWT_SECRET  = process.env.JWT_SECRET;
+const ORIGIN           = process.env.ORIGIN      || "https://localhost:5173";
+const JWT_SECRET       = process.env.JWT_SECRET;
 const FACE_TOKEN_EXPIRY = "10m";
 const GPS_TOKEN_EXPIRY  = "10m";
 const COLLECTION_ID     = "attendiq-faces";
@@ -49,43 +56,7 @@ async function ensureCollection() {
   }
 }
 
-// ── Middleware ─────────────────────────────────────────────────────────────
-
-function requireAuth(req, res, next) {
-  const token = req.headers.authorization?.split(" ")[1];
-  if (!token) return res.status(401).json({ message: "No token provided" });
-  try {
-    req.user = jwt.verify(token, JWT_SECRET);
-    next();
-  } catch {
-    res.status(401).json({ message: "Invalid or expired token" });
-  }
-}
-
-function requireAdmin(req, res, next) {
-  requireAuth(req, res, () => {
-    if (req.user.role !== "admin" && req.user.role !== "superadmin") {
-      return res.status(403).json({ message: "Admin access required" });
-    }
-    next();
-  });
-}
-
-function requireSuperAdmin(req, res, next) {
-  requireAuth(req, res, () => {
-    if (req.user.role !== "superadmin") {
-      return res.status(403).json({ message: "Superadmin access required" });
-    }
-    next();
-  });
-}
-
-function getTenantId(req) {
-  if (req.user.role === "superadmin") {
-    return req.query.tenantId || req.body.tenantId || null;
-  }
-  return req.user.tenantId;
-}
+// ── Helpers ────────────────────────────────────────────────────────────────
 
 function haversineDistance(lat1, lon1, lat2, lon2) {
   const R = 6371000;
@@ -141,7 +112,7 @@ app.post("/api/auth/login", async (req, res) => {
       });
     }
 
-    // Tenant user — verify tenant slug matches
+    // Tenant user — verify tenant slug matches if provided
     if (tenantSlug) {
       const tenant = await prisma.tenant.findUnique({ where: { slug: tenantSlug } });
       if (!tenant) return res.status(404).json({ message: "Company not found" });
@@ -151,7 +122,6 @@ app.post("/api/auth/login", async (req, res) => {
         return res.status(401).json({ message: "Invalid username or password" });
     }
 
-    // Check tenant is active
     if (user.tenant && !user.tenant.isActive) {
       return res.status(403).json({ message: "Your company account is inactive. Please contact support." });
     }
@@ -212,7 +182,6 @@ app.post("/api/superadmin/tenants", requireSuperAdmin, async (req, res) => {
     const existing = await prisma.tenant.findUnique({ where: { slug } });
     if (existing) return res.status(409).json({ message: "Company slug already exists" });
 
-    // Derive a default username from the admin email (part before @)
     const defaultUsername = adminEmail.toLowerCase().split("@")[0];
     const existingUsername = await prisma.user.findUnique({ where: { username: defaultUsername } });
     if (existingUsername) {
@@ -306,9 +275,8 @@ app.get("/api/superadmin/users", requireSuperAdmin, async (req, res) => {
 app.post("/api/superadmin/users", requireSuperAdmin, async (req, res) => {
   try {
     const { name, username, email, password, role, dept, tenantId, officeId, color, avatarInitials } = req.body;
-    if (!name || !username || !password) {
+    if (!name || !username || !password)
       return res.status(400).json({ message: "Name, username and password required" });
-    }
 
     const existingUsername = await prisma.user.findUnique({ where: { username: username.toLowerCase() } });
     if (existingUsername) return res.status(409).json({ message: "Username already taken" });
@@ -321,9 +289,8 @@ app.post("/api/superadmin/users", requireSuperAdmin, async (req, res) => {
     if (officeId) {
       if (!tenantId) return res.status(400).json({ message: "Cannot assign an office without a tenant" });
       const office = await prisma.office.findUnique({ where: { id: officeId } });
-      if (!office || office.tenantId !== tenantId) {
+      if (!office || office.tenantId !== tenantId)
         return res.status(400).json({ message: "Office does not belong to the selected tenant" });
-      }
     }
 
     const hashed = await bcrypt.hash(password, 10);
@@ -361,15 +328,13 @@ app.put("/api/superadmin/users/:id", requireSuperAdmin, async (req, res) => {
     if (!name || !username) return res.status(400).json({ message: "Name and username required" });
 
     const existingUsername = await prisma.user.findUnique({ where: { username: username.toLowerCase() } });
-    if (existingUsername && existingUsername.id !== req.params.id) {
+    if (existingUsername && existingUsername.id !== req.params.id)
       return res.status(409).json({ message: "Username already taken by another user" });
-    }
 
     if (email) {
       const existingEmail = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
-      if (existingEmail && existingEmail.id !== req.params.id) {
+      if (existingEmail && existingEmail.id !== req.params.id)
         return res.status(409).json({ message: "Email already in use by another user" });
-      }
     }
 
     const data = {
@@ -452,9 +417,8 @@ app.post("/api/auth/face/verify", async (req, res) => {
     if (!userId || !imageBase64) return res.status(400).json({ message: "userId and imageBase64 required" });
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
-    if (!user?.azureFaceId || !user.faceRegistered) {
+    if (!user?.azureFaceId || !user.faceRegistered)
       return res.status(400).json({ message: "No face registered for this user" });
-    }
 
     const imageBuffer = Buffer.from(imageBase64.replace(/^data:image\/\w+;base64,/, ""), "base64");
     const result = await rekognition.send(new SearchFacesByImageCommand({
@@ -465,22 +429,19 @@ app.post("/api/auth/face/verify", async (req, res) => {
       QualityFilter: "AUTO",
     }));
 
-    if (!result.FaceMatches || result.FaceMatches.length === 0) {
+    if (!result.FaceMatches || result.FaceMatches.length === 0)
       return res.status(401).json({ verified: false, message: "Face did not match. Please try again." });
-    }
 
     const match = result.FaceMatches[0];
-    if (match.Face.ExternalImageId !== userId || match.Similarity < 80) {
+    if (match.Face.ExternalImageId !== userId || match.Similarity < 80)
       return res.status(401).json({ verified: false, message: "Face did not match. Please try again." });
-    }
 
     const faceToken = jwt.sign({ userId, faceVerified: true }, JWT_SECRET, { expiresIn: FACE_TOKEN_EXPIRY });
     res.json({ verified: true, faceToken, confidence: match.Similarity });
   } catch (err) {
     console.error("Face verify error:", err);
-    if (err.name === "InvalidParameterException") {
+    if (err.name === "InvalidParameterException")
       return res.status(401).json({ verified: false, message: "No face detected. Look directly at the camera in good lighting." });
-    }
     res.status(500).json({ message: err.message || "Face verification failed" });
   }
 });
@@ -553,20 +514,16 @@ app.put("/api/admin/users/:id", requireAdmin, async (req, res) => {
     const target = await prisma.user.findUnique({ where: { id: req.params.id } });
     if (!target) return res.status(404).json({ message: "User not found" });
 
-    if (req.user.role !== "superadmin" && target.tenantId !== req.user.tenantId) {
-      return res.status(403).json({ message: "Cannot edit a user outside your company" });
-    }
+    if (!requireSameTenant(target.tenantId, req, res)) return;
 
     const existingUsername = await prisma.user.findUnique({ where: { username: username.toLowerCase() } });
-    if (existingUsername && existingUsername.id !== req.params.id) {
+    if (existingUsername && existingUsername.id !== req.params.id)
       return res.status(409).json({ message: "Username already taken by another user" });
-    }
 
     if (email) {
       const existingEmail = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
-      if (existingEmail && existingEmail.id !== req.params.id) {
+      if (existingEmail && existingEmail.id !== req.params.id)
         return res.status(409).json({ message: "Email already in use by another user" });
-      }
     }
 
     const data = {
@@ -638,10 +595,8 @@ app.post("/api/admin/offices", requireAdmin, async (req, res) => {
   try {
     const tenantId = getTenantId(req);
     if (!tenantId) return res.status(400).json({ message: "tenantId required" });
-
     const { name, lat, lng, radiusMetres } = req.body;
     if (!name || !lat || !lng) return res.status(400).json({ message: "Name, lat and lng required" });
-
     const office = await prisma.office.create({
       data: { tenantId, name, lat: parseFloat(lat), lng: parseFloat(lng), radiusMetres: parseInt(radiusMetres) || 150 },
     });
@@ -668,29 +623,43 @@ app.delete("/api/admin/offices/:id", requireAdmin, async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-// ADMIN — STATS + ATTENDANCE (tenant-scoped)
+// ADMIN — STATS TODAY (office-filterable)
 // ══════════════════════════════════════════════════════════════════════════
 
 app.get("/api/admin/stats/today", requireAdmin, async (req, res) => {
   try {
     const tenantId = getTenantId(req);
+    const { officeId } = req.query;
     const today = new Date().toISOString().split("T")[0];
-    const where = tenantId ? { tenantId } : {};
-    const total = await prisma.user.count({ where: { ...where, role: "staff" } });
-    const records = await prisma.attendance.findMany({ where: { ...where, date: today } });
+
+    const userWhere = { ...(tenantId ? { tenantId } : {}), role: "staff" };
+    if (officeId) userWhere.officeId = officeId;
+
+    const attendanceWhere = { ...(tenantId ? { tenantId } : {}), date: today };
+    if (officeId) attendanceWhere.officeId = officeId;
+
+    const total = await prisma.user.count({ where: userWhere });
+    const records = await prisma.attendance.findMany({ where: attendanceWhere });
     const onTime = records.filter(r => r.status === "on-time").length;
     const late   = records.filter(r => r.status === "late").length;
+
     res.json({ total, onTime, late, absent: total - records.length });
   } catch (err) { res.status(500).json({ message: "Failed to fetch stats" }); }
 });
 
+// ══════════════════════════════════════════════════════════════════════════
+// ADMIN — ATTENDANCE (office-filterable)
+// ══════════════════════════════════════════════════════════════════════════
+
 app.get("/api/admin/attendance", requireAdmin, async (req, res) => {
   try {
     const tenantId = getTenantId(req);
-    const { startDate, endDate, userId } = req.query;
+    const { startDate, endDate, userId, officeId } = req.query;
     const where = tenantId ? { tenantId } : {};
     if (startDate && endDate) where.date = { gte: startDate, lte: endDate };
-    if (userId) where.userId = userId;
+    if (userId)   where.userId   = userId;
+    if (officeId) where.officeId = officeId;
+
     const records = await prisma.attendance.findMany({
       where,
       include: { user: { select: { name: true, dept: true, color: true, avatarInitials: true } } },
@@ -701,21 +670,27 @@ app.get("/api/admin/attendance", requireAdmin, async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-// ADMIN — LEADERBOARD (tenant-scoped)
+// ADMIN — LEADERBOARD (office-filterable)
 // ══════════════════════════════════════════════════════════════════════════
 
 app.get("/api/admin/leaderboard", requireAdmin, async (req, res) => {
   try {
     const tenantId = getTenantId(req);
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, officeId } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ message: "startDate and endDate required" });
 
     const where = tenantId ? { tenantId } : {};
+    const userWhere = { ...where, role: "staff" };
+    if (officeId) userWhere.officeId = officeId;
+
+    const attendanceWhere = { ...where, date: { gte: startDate, lte: endDate } };
+    if (officeId) attendanceWhere.officeId = officeId;
+
     const users = await prisma.user.findMany({
-      where: { ...where, role: "staff" },
+      where: userWhere,
       select: { id: true, name: true, dept: true, color: true, avatarInitials: true },
     });
-    const records = await prisma.attendance.findMany({ where: { ...where, date: { gte: startDate, lte: endDate } } });
+    const records = await prisma.attendance.findMany({ where: attendanceWhere });
 
     const start = new Date(startDate);
     const end   = new Date(endDate);
@@ -732,7 +707,12 @@ app.get("/api/admin/leaderboard", requireAdmin, async (req, res) => {
       return { userId: user.id, name: user.name, dept: user.dept, color: user.color, avatarInitials: user.avatarInitials, onTimeCount, lateCount, totalDays: userRecords.length };
     }).sort((a, b) => b.onTimeCount !== a.onTimeCount ? b.onTimeCount - a.onTimeCount : a.lateCount - b.lateCount);
 
-    res.json({ leaderboard, totalStaff: users.length, workingDays, perfectAttendance: leaderboard.filter(s => s.totalDays === workingDays && s.lateCount === 0).length });
+    res.json({
+      leaderboard,
+      totalStaff: users.length,
+      workingDays,
+      perfectAttendance: leaderboard.filter(s => s.totalDays === workingDays && s.lateCount === 0).length,
+    });
   } catch (err) {
     console.error("Leaderboard error:", err);
     res.status(500).json({ message: "Failed to fetch leaderboard" });
@@ -740,18 +720,24 @@ app.get("/api/admin/leaderboard", requireAdmin, async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-// ADMIN — ANALYTICS (tenant-scoped)
+// ADMIN — ANALYTICS (office-filterable)
 // ══════════════════════════════════════════════════════════════════════════
 
 app.get("/api/admin/analytics", requireAdmin, async (req, res) => {
   try {
     const tenantId = getTenantId(req);
-    const { startDate, endDate } = req.query;
+    const { startDate, endDate, officeId } = req.query;
     if (!startDate || !endDate) return res.status(400).json({ message: "startDate and endDate required" });
 
     const where = tenantId ? { tenantId } : {};
-    const users = await prisma.user.findMany({ where: { ...where, role: "staff" }, select: { id: true, dept: true } });
-    const records = await prisma.attendance.findMany({ where: { ...where, date: { gte: startDate, lte: endDate } } });
+    const userWhere = { ...where, role: "staff" };
+    if (officeId) userWhere.officeId = officeId;
+
+    const attendanceWhere = { ...where, date: { gte: startDate, lte: endDate } };
+    if (officeId) attendanceWhere.officeId = officeId;
+
+    const users   = await prisma.user.findMany({ where: userWhere, select: { id: true, dept: true } });
+    const records = await prisma.attendance.findMany({ where: attendanceWhere });
 
     const totalStaff    = users.length;
     const totalCheckIns = records.length;
@@ -774,7 +760,11 @@ app.get("/api/admin/analytics", requireAdmin, async (req, res) => {
     for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
       const dateStr = d.toISOString().split("T")[0];
       if (d.getDay() === 0 || d.getDay() === 6) continue;
-      dailyMap[dateStr] = { date: dateStr, label: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }), onTime: 0, late: 0, absent: totalStaff };
+      dailyMap[dateStr] = {
+        date: dateStr,
+        label: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        onTime: 0, late: 0, absent: totalStaff,
+      };
     }
     records.forEach(r => {
       if (dailyMap[r.date]) {
@@ -793,10 +783,20 @@ app.get("/api/admin/analytics", requireAdmin, async (req, res) => {
 
     const deptMap = {};
     users.forEach(u => { if (!deptMap[u.dept]) deptMap[u.dept] = { total: 0, onTime: 0 }; deptMap[u.dept].total += workingDays; });
-    records.forEach(r => { const u = users.find(u => u.id === r.userId); if (u && deptMap[u.dept] && r.status === "on-time") deptMap[u.dept].onTime++; });
-    const deptData = Object.entries(deptMap).map(([dept, { total, onTime }]) => ({ dept, total, onTime, onTimeRate: total > 0 ? Math.round((onTime / total) * 100) : 0 })).sort((a, b) => b.onTimeRate - a.onTimeRate);
+    records.forEach(r => {
+      const u = users.find(u => u.id === r.userId);
+      if (u && deptMap[u.dept] && r.status === "on-time") deptMap[u.dept].onTime++;
+    });
+    const deptData = Object.entries(deptMap)
+      .map(([dept, { total, onTime }]) => ({ dept, total, onTime, onTimeRate: total > 0 ? Math.round((onTime / total) * 100) : 0 }))
+      .sort((a, b) => b.onTimeRate - a.onTimeRate);
 
-    res.json({ summary: { totalCheckIns, totalOnTime, totalLate, totalAbsent, workingDays, attendanceRate }, dailyData: Object.values(dailyMap), pieData, deptData });
+    res.json({
+      summary: { totalCheckIns, totalOnTime, totalLate, totalAbsent, workingDays, attendanceRate },
+      dailyData: Object.values(dailyMap),
+      pieData,
+      deptData,
+    });
   } catch (err) {
     console.error("Analytics error:", err);
     res.status(500).json({ message: "Failed to fetch analytics" });
@@ -816,7 +816,8 @@ app.post("/api/attendance/validate-gps", async (req, res) => {
       return res.status(403).json({ message: "Face verification expired. Please verify your face first." });
     }
 
-    if (accuracy > 150) return res.status(400).json({ valid: false, message: `GPS accuracy too low (±${accuracy}m). Move to open area.` });
+    if (accuracy > 150)
+      return res.status(400).json({ valid: false, message: `GPS accuracy too low (±${accuracy}m). Move to open area.` });
 
     const user = await prisma.user.findUnique({ where: { id: userId }, include: { office: true } });
     if (!user?.office) return res.status(404).json({ message: "No office assigned to this user" });
@@ -826,7 +827,11 @@ app.post("/api/attendance/validate-gps", async (req, res) => {
     const effectiveDistance = distance + accuracy;
 
     if (effectiveDistance > office.radiusMetres) {
-      return res.status(403).json({ valid: false, distance: Math.round(distance), message: `Too far from ${office.name} (${Math.round(distance)}m away, ${office.radiusMetres}m allowed)` });
+      return res.status(403).json({
+        valid: false,
+        distance: Math.round(distance),
+        message: `Too far from ${office.name} (${Math.round(distance)}m away, ${office.radiusMetres}m allowed)`,
+      });
     }
 
     const gpsToken = jwt.sign(
@@ -843,7 +848,7 @@ app.post("/api/attendance/validate-gps", async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════
-// ATTENDANCE (tenant-scoped)
+// ATTENDANCE — CLOCK IN / OUT
 // ══════════════════════════════════════════════════════════════════════════
 
 app.post("/api/attendance/clock-in", async (req, res) => {
@@ -854,9 +859,8 @@ app.post("/api/attendance/clock-in", async (req, res) => {
       return res.status(403).json({ message: "Session expired. Please start over." });
     }
 
-    if (!payload.gpsVerified || !payload.faceVerified) {
+    if (!payload.gpsVerified || !payload.faceVerified)
       return res.status(403).json({ message: "Face and GPS verification both required" });
-    }
 
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return res.status(404).json({ message: "User not found" });
