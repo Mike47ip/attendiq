@@ -72,7 +72,8 @@ function haversineDistance(lat1, lon1, lat2, lon2) {
 
 function getAttendanceStatus(clockInTime) {
   const [h, m] = clockInTime.split(":").map(Number);
-  return h > 9 || (h === 9 && m > 5) ? "late" : "on-time";
+  // On-time cutoff is 8:00am — anything at or after 8:00 is late
+  return h >= 8 ? "late" : "on-time";
 }
 
 // ══════════════════════════════════════════════════════════════════════════
