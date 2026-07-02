@@ -705,8 +705,29 @@ app.get("/api/admin/leaderboard", requireAdmin, async (req, res) => {
       const userRecords = records.filter(r => r.userId === user.id);
       const onTimeCount = userRecords.filter(r => r.status === "on-time").length;
       const lateCount   = userRecords.filter(r => r.status === "late").length;
-      return { userId: user.id, name: user.name, dept: user.dept, color: user.color, avatarInitials: user.avatarInitials, onTimeCount, lateCount, totalDays: userRecords.length };
-    }).sort((a, b) => b.onTimeCount !== a.onTimeCount ? b.onTimeCount - a.onTimeCount : a.lateCount - b.lateCount);
+      // Average clock-in time in minutes since midnight — used as final tiebreaker
+      // Earlier average = better rank
+      const avgClockInMinutes = userRecords.length > 0
+        ? userRecords.reduce((sum, r) => {
+            const [h, m] = r.clockIn.split(":").map(Number);
+            return sum + (h * 60 + m);
+          }, 0) / userRecords.length
+        : 9999;
+
+      return {
+        userId: user.id, name: user.name, dept: user.dept,
+        color: user.color, avatarInitials: user.avatarInitials,
+        onTimeCount, lateCount, totalDays: userRecords.length,
+        avgClockInMinutes,
+      };
+    }).sort((a, b) => {
+      // 1st priority: most on-time arrivals
+      if (b.onTimeCount !== a.onTimeCount) return b.onTimeCount - a.onTimeCount;
+      // 2nd priority: least late arrivals
+      if (a.lateCount !== b.lateCount) return a.lateCount - b.lateCount;
+      // 3rd priority: earliest average clock-in time — Bright clocks in at 5:59, Douglas at 7:17, Bright wins
+      return a.avgClockInMinutes - b.avgClockInMinutes;
+    });
 
     res.json({
       leaderboard,
